@@ -22,7 +22,6 @@ static void check(int ok, const char *what, const char *detail)
 
 int main(void)
 {
-    char buf[LS_ERRBUF_MIN];
     char detail[256];
     int  i, highest = 0;
 
@@ -32,9 +31,9 @@ int main(void)
      *    range is everything above. Find the largest errno this platform
      *    actually defines by asking the C library which codes it can name. */
     for (i = 1; i < 4096; i++) {
-        if (strerror_r(i, buf, sizeof buf) == 0 &&
-            strncmp(buf, "Unknown error", 13) != 0)
-            highest = i;
+        const char *m = strerror(i);       /* single-threaded here; and this
+                                              avoids strerror_r's two flavours */
+        if (m && strncmp(m, "Unknown error", 13) != 0) highest = i;
     }
     sprintf(detail, "highest named errno = %d", highest);
     check(highest > 0 && highest < 1000,

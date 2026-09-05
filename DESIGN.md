@@ -10,9 +10,12 @@ before reopening a settled question, because each was closed by a test in
 
 The one thing not settled, and not settleable on paper: **does asynchronous
 overlap actually win on a real out-of-core workload?** That is success criterion
-2 (§1) and it decides whether the project is worth finishing. Cheapest route to
-an answer is the abacus port (~6 call sites, §6), which also tests whether the
-API survives contact with a caller before either lead adopter spends anything.
+2 (§1) and it decides whether the project is worth finishing. §7f reports the
+first measurements: promising, and not yet conclusive on a shared machine.
+
+The first ports are **Psi4 and OpenMolcas** rather than the technically cheaper
+abacus. For a criterion that is deprecation rather than adoption, a maintainer
+who knows the code outranks a low call-site count.
 
 Evidence base: the 53-code survey in `/home/work/libxcsurvey` — `scan_io.py`
 (dispersion), the scratch-I/O addendum in each `SUBLIBRARY_MANIFEST.md`, and the
@@ -448,6 +451,11 @@ out, and for a project whose success criterion is *deprecation* rather than
 adoption, willingness outranks fit: a cheap port nobody wants is worth less than
 an expensive one somebody has asked for.
 
+**Decided: Psi4 and OpenMolcas go first.** abacus is the cheaper shakedown on
+paper, but the same argument that puts willingness above fit puts familiarity
+above call-site count -- the people doing these two ports know both codes well,
+and a port that stalls on unfamiliar internals tests nothing at all.
+
 **Not a target: ERKALE.** Its checkpoints are portable HDF5 for long-term
 wavefunction storage — durable output, which §3 explicitly excludes. The
 enumeration tagged it `scratch_io`; that tag is wrong, and the distinction is
@@ -650,6 +658,66 @@ Conclusion: not a primary backend, and compression is not the library's selling
 point. Keep it as an optional codec for sparse payloads on slow filesystems,
 decided per store at open time rather than designed in.
 
+## 7f. First measurements of the POSIX backend
+
+`src/` implements the twelve entry points of §4b; `make check` runs the suite.
+Measured on one 6-core Fedora machine, SK Hynix NVMe, ext4 over LUKS, with other
+work running on it. Read these as a first reading, not a result: §7 asks for one
+I/O-bound workload per adopter on both a shared filesystem and node-local NVMe,
+and none of that is done.
+
+**The measurement trap §7e warns about is real and nearly caught us again.** On
+this machine `/tmp` is a *tmpfs*, so every number taken there describes RAM.
+Everything below is on the ext4 filesystem with `O_DIRECT`, except where the
+memory tier is the thing being measured.
+
+**Space under churn** (`tests/churn_libscratch.c`, the protocol of
+`tests/hdf5_churn_varsize.py` exactly: 8 records, 60 cycles, each recreated at a
+different random size):
+
+| | default | fsm | page | libscratch |
+|---|---|---|---|---|
+| file / live | x1.61 | x1.75 | x1.37 | **x1.13** |
+
+Two things earned that, and both were bugs first. Best-fit with coalescing gave
+x1.44 -- *worse* than HDF5 -- because a record had to fit one contiguous extent,
+so a freed hole was dead whenever the next record was larger. Splitting a record
+across several holes took it to x1.28. The rest was a file that never shrank:
+freeing the tail hole moved the allocator's idea of the end without truncating,
+so the file kept its high-water mark.
+
+**Overlap** (`bench/ooc_bench.c`; 48 blocks x 8 MiB, read-compute-write per
+block, medians of 5 interleaved repetitions). Four variants, because two
+different things need measuring: raw POSIX synchronous (A) is what libpsio does
+today, libscratch synchronous (D) is A plus our overhead, raw POSIX with a
+hand-rolled prefetch thread (B) is what a careful caller writes for itself, and
+libscratch async (C) is the library. **B, not A, is the honest baseline** --
+measuring against A alone would credit the library with an overlap any competent
+caller could have written.
+
+| | A raw sync | D ls sync | B hand prefetch | C ls async |
+|---|---|---|---|---|
+| median, 8 flop/elem | 0.489 s | 0.486 s | 0.382 s | 0.315 s |
+
+- **The abstraction costs nothing**: A to D is within +-1%. It cost +28% until
+  the `O_DIRECT` path stopped staging aligned buffers through a bounce buffer.
+- **Async beats a hand-rolled prefetch by 11-14%** at 32 flop/element,
+  reproducibly across runs.
+- **Below that the machine is louder than the effect.** At 8 flop/element three
+  runs gave -14%, -18% and +11%. That is not a result, and it is what a loaded
+  6-core box buys you. Criterion 2 needs a quiet node.
+
+**The memory tier is the largest win, as §5.2 predicted** (budget covering the
+working set, against buffered raw I/O with the cache dropped between passes):
+libscratch is **29% faster than the hand-rolled prefetch and 54% faster than raw
+synchronous**, because it does no disk I/O at all. This is the one number here
+that does not need a quiet machine to be believed, and it is the easiest thing
+for an adopter to gain.
+
+Correctness: 73 checks pass, and the suite runs clean under both valgrind
+memcheck and helgrind -- worth stating explicitly given that §7b disqualified
+HDF5 partly on heap corruption at two threads.
+
 ## 8. Open questions
 
 - ~~Is HDF5 an adequate backend, making this a façade?~~ **settled, partly**
@@ -683,4 +751,8 @@ decided per store at open time rather than designed in.
 Still open, and the only one that matters:
 
 - **Does asynchronous overlap win on a real out-of-core workload?** Criterion 2
-  (§1), answerable only by measurement, and cheapest via the abacus port (§6).
+  (§1). First measurements in §7f are encouraging -- 11-14% over a hand-rolled
+  prefetch at high compute intensity, and 29% from the memory tier -- but they
+  come from one loaded workstation. The question stays open until it is answered
+  on a quiet node, on both a shared filesystem and node-local NVMe, inside a
+  real Psi4 or OpenMolcas workload rather than a benchmark kernel.

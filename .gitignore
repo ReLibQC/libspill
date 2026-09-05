@@ -1,0 +1,7 @@
+libscratch.a
+*.o
+*.d
+tests/abi_header_test
+tests/test_posix
+tests/churn_libscratch
+bench/ooc_bench

@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "libscratch.h"
+#include "libspill.h"
 
 static int fails = 0, ntest = 0;
 
@@ -97,7 +97,7 @@ static void t_errors(void)
     {   /* §4b: the description must be usable for both error ranges */
         char b[LS_ERRBUF_MIN];
         ok(strstr(ls_strerror(LS_ERR_NOKEY, b, sizeof b), "key") != NULL,
-           "ls_strerror describes a libscratch code");
+           "ls_strerror describes a libspill code");
         ok(strlen(ls_strerror(-ENOSPC, b, sizeof b)) > 0,
            "ls_strerror describes a negated errno");
     }
@@ -214,7 +214,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read from the memory tier");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "memory tier round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem.libscratch", dir);
+    snprintf(path, sizeof path, "%s/t_mem.libspill", dir);
     ok(stat(path, &st) == 0 && st.st_size == 4096,
        "nothing was written to disk while under budget");
     ls_close(s, 0);
@@ -226,7 +226,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read a spilled record");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "spilled record round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem2.libscratch", dir);
+    snprintf(path, sizeof path, "%s/t_mem2.libspill", dir);
     ok(stat(path, &st) == 0 && st.st_size > 4096, "the spill reached disk");
     ls_close(s, 0);
 
@@ -365,7 +365,7 @@ static void t_persist(void)
         const char *dir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
         char path[512];
         FILE *f;
-        snprintf(path, sizeof path, "%s/t_junk.libscratch", dir);
+        snprintf(path, sizeof path, "%s/t_junk.libspill", dir);
         f = fopen(path, "wb");
         if (f) { char junk[8192]; memset(junk, 'Z', sizeof junk);
                  fwrite(junk, 1, sizeof junk, f); fclose(f); }
@@ -378,7 +378,7 @@ static void t_persist(void)
 
 int main(void)
 {
-    puts("libscratch POSIX backend");
+    puts("libspill POSIX backend");
     t_roundtrip();
     t_errors();
     t_options();

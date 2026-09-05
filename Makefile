@@ -1,4 +1,4 @@
-# libscratch -- POSIX backend, no dependencies beyond pthreads.
+# libspill -- POSIX backend, no dependencies beyond pthreads.
 
 CC      ?= cc
 CXX     ?= c++
@@ -18,19 +18,19 @@ LDLIBS  += -lpthread
 
 SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
 OBJ  := $(SRC:.c=.o)
-LIB  := libscratch.a
+LIB  := libspill.a
 
-TESTS := tests/abi_header_test tests/test_posix tests/churn_libscratch
+TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill
 BENCH := bench/ooc_bench
 
-# Psi4's libpsio reimplemented on libscratch. Built here so the port is tested
+# Psi4's libpsio reimplemented on libspill. Built here so the port is tested
 # without a Psi4 tree; in Psi4 it replaces 23 files and no call site.
-PORT_SRC  := port/psi4/psio_libscratch.cc
+PORT_SRC  := port/psi4/psio_libspill.cc
 PORT_TEST := port/psi4/test_psio_shim
 
 # OpenMolcas's DaFile family, over the Fortran binding of §4a. Needs a Fortran
 # compiler; `make check-c` skips it.
-FORT_OBJ  := fortran/libscratch.o port/openmolcas/dafile_libscratch.o
+FORT_OBJ  := fortran/libspill.o port/openmolcas/dafile_libspill.o
 FORT_TEST := port/openmolcas/test_dafile_shim
 DEP   := $(OBJ:.o=.d) $(TESTS:=.d) $(BENCH:=.d)
 
@@ -51,10 +51,10 @@ bench/%: bench/%.c $(LIB)
 $(PORT_TEST): port/psi4/test_psio_shim.cc $(PORT_SRC) $(LIB)
 	$(CXX) $(CXXFLAGS) -o $@ port/psi4/test_psio_shim.cc $(PORT_SRC) $(LIB) $(LDLIBS)
 
-fortran/libscratch.o: fortran/libscratch.F90 include/libscratch.h
+fortran/libspill.o: fortran/libspill.F90 include/libspill.h
 	$(FC) $(FCFLAGS) -c -o $@ $<
 
-port/openmolcas/dafile_libscratch.o: port/openmolcas/dafile_libscratch.F90 fortran/libscratch.o
+port/openmolcas/dafile_libspill.o: port/openmolcas/dafile_libspill.F90 fortran/libspill.o
 	$(FC) $(FCFLAGS) -c -o $@ $<
 
 $(FORT_TEST): port/openmolcas/test_dafile_shim.F90 $(FORT_OBJ) $(LIB)

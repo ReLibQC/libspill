@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "libscratch.h"
-#include "libscratch.h"   /* include guard must make this a no-op */
+#include "libspill.h"
+#include "libspill.h"   /* include guard must make this a no-op */
 
 static int fails = 0;
 
@@ -25,7 +25,7 @@ int main(void)
     char detail[256];
     int  i, highest = 0;
 
-    puts("libscratch ABI assumptions");
+    puts("libspill ABI assumptions");
 
     /* 1. The two error ranges must not overlap. Ours start at -1000; the errno
      *    range is everything above. Find the largest errno this platform
@@ -39,7 +39,7 @@ int main(void)
     check(highest > 0 && highest < 1000,
           "errno range stays clear of -1000", detail);
 
-    /* 2. Every libscratch code sits in its own range. */
+    /* 2. Every libspill code sits in its own range. */
     check(LS_OK == 0, "LS_OK is zero", "");
     check(LS_ERR_NOKEY   <= -1000 && LS_ERR_RANGE   <= -1000 &&
           LS_ERR_INVAL   <= -1000 && LS_ERR_MODE    <= -1000 &&

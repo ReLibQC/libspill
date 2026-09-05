@@ -1,4 +1,4 @@
-! OpenMolcas's DaFile family, reimplemented on libscratch.
+! OpenMolcas's DaFile family, reimplemented on libspill.
 !
 ! Unlike the Psi4 port (DESIGN.md §6b), this one cannot treat the address as
 ! opaque. Psi4 consumers never do arithmetic on psio_address -- `.page` appears
@@ -16,11 +16,11 @@
 ! Two things disappear by construction:
 !
 !   * Multi_File / MaxFileSize striping (mpdafile.F90 and friends, 328 lines,
-!     23 references) exists because a unit could outgrow a file. A libscratch
+!     23 references) exists because a unit could outgrow a file. A libspill
 !     store has no such limit, so the split-file machinery has nothing to do --
 !     the same bug class §6a deletes from crayio's fixed max_file table.
 !   * The shared position array Addr() that §5a identifies as unguarded across
-!     some 672 call sites. libscratch uses pread/pwrite and carries no file
+!     some 672 call sites. libspill uses pread/pwrite and carries no file
 !     position at all, so the thread-safety problem is not fixed, it is absent.
 !
 ! And one thing becomes real. iOpt 6 and 7 are documented as asynchronous write
@@ -33,7 +33,7 @@
 
 module daf_ls_state
   use, intrinsic :: iso_c_binding
-  use libscratch
+  use libspill
   implicit none
   public
 
@@ -106,7 +106,7 @@ subroutine DaName_Internal(Lu, Name, wa)
   if (units(Lu)%open) return
 
   o = ls_defaults()
-  ! libscratch takes the directory as a C string; the saved target above keeps
+  ! libspill takes the directory as a C string; the saved target above keeps
   ! the pointer valid for the life of every store.
   if (have_dir) o%dir = c_loc(dir_buf(1))
 

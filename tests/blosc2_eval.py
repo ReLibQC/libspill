@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Does Blosc2 earn a place as a libscratch backend?
+"""Does Blosc2 earn a place as a libspill backend?
 
 The question is not whether it compresses -- it is whether compress+write beats
 write for the payloads these codes actually spill: coupled-cluster amplitudes,

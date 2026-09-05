@@ -1,4 +1,4 @@
-! libscratch -- Fortran interface.
+! libspill -- Fortran interface.
 !
 ! DESIGN.md §4a: "The C entry points remain public and supported -- Fortran needs
 ! them and ABI stability is the point -- but no C++ or Python consumer should
@@ -7,11 +7,11 @@
 ! buffers are passed by reference, and errors come back as an integer that
 ! ls_strerror_f turns into text.
 !
-! Everything here is bind(c) against include/libscratch.h. The struct layout of
+! Everything here is bind(c) against include/libspill.h. The struct layout of
 ! ls_opts is mirrored exactly; its `version` field is what lets this module keep
 ! working when the C struct grows.
 
-module libscratch
+module libspill
   use, intrinsic :: iso_c_binding
   implicit none
   private
@@ -313,4 +313,4 @@ contains
     end do
   end function ls_strerror_f
 
-end module libscratch
+end module libspill

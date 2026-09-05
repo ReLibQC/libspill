@@ -1,4 +1,4 @@
-#include "psio_libscratch.h"
+#include "psio_libspill.h"
 
 #include <cstdio>
 #include <cstring>
@@ -9,7 +9,7 @@
 #include <vector>
 
 extern "C" {
-#include "libscratch.h"
+#include "libspill.h"
 }
 
 namespace psi {
@@ -50,7 +50,7 @@ inline psio_address to_address(uint64_t b) {
     return a;
 }
 
-/* libscratch's codes carry more detail than Psi4's, so the mapping loses
+/* libspill's codes carry more detail than Psi4's, so the mapping loses
  * information on purpose: Psi4's call sites only ever branch on which of its
  * own PSIO_ERROR_* values came back. The detail is not thrown away -- the log
  * callback below reports it with the key and offset attached, which is more
@@ -66,7 +66,7 @@ int psio_err_of(int rc, int on_read) {
 
 void log_cb(int err, const char *key, uint64_t off, size_t nbytes, const char *msg, void *) {
     char buf[LS_ERRBUF_MIN];
-    std::fprintf(stderr, "PSIO/libscratch: %s (key %s, offset %llu, %zu bytes): %s\n",
+    std::fprintf(stderr, "PSIO/libspill: %s (key %s, offset %llu, %zu bytes): %s\n",
                  msg ? msg : "operation", key ? key : "-",
                  static_cast<unsigned long long>(off), nbytes,
                  ls_strerror(err, buf, sizeof buf));
@@ -119,7 +119,7 @@ int psio_open(size_t unit, int status) {
     if (!g_dir.empty()) o.dir = g_dir.c_str();
     o.log = log_cb;
 
-    /* PSIO_OPEN_NEW must not inherit a previous run's contents. libscratch
+    /* PSIO_OPEN_NEW must not inherit a previous run's contents. libspill
      * reopens a kept store when one is there, so a NEW unit removes it first. */
     if (status == PSIO_OPEN_NEW) {
         int err = 0;
@@ -248,7 +248,7 @@ void psio_tocprint(size_t unit) {
     ls_keys_free(keys, n);
 }
 
-/* The on-disk table of contents is libscratch's now, so these have nothing left
+/* The on-disk table of contents is libspill's now, so these have nothing left
  * to do. tocwrite has exactly one consumer outside libpsio and rd_toclen has
  * none, which is why that ownership transfer is free. */
 int psio_tocwrite(size_t) { return 1; }

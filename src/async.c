@@ -61,7 +61,7 @@ static void *worker(void *arg)
 
 int ls_pool_start(ls_store *s)
 {
-    const char *e = getenv("LIBSCRATCH_IO_THREADS");
+    const char *e = getenv("LIBSPILL_IO_THREADS");
     size_t i, n = LS_THREADS_DEFAULT;
 
     if (e && *e) {

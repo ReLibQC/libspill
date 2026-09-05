@@ -1,4 +1,4 @@
-/* Psi4's libpsio, reimplemented on libscratch.
+/* Psi4's libpsio, reimplemented on libspill.
  *
  * The signatures below are Psi4's, unchanged. That is the whole point: §7 of
  * DESIGN.md says the API is wrong if a port needs more than a mechanical
@@ -19,10 +19,10 @@
  *      filled, not a node in a live linked list.
  *   3. The on-disk table of contents is nobody's business. rd_toclen, tocread
  *      and toclen have no consumers outside libpsio; tocwrite has one. So
- *      libscratch owning the table of contents costs Psi4 nothing.
+ *      libspill owning the table of contents costs Psi4 nothing.
  */
-#ifndef PSIO_LIBSCRATCH_H
-#define PSIO_LIBSCRATCH_H
+#ifndef PSIO_LIBSPILL_H
+#define PSIO_LIBSPILL_H
 
 #include <string>
 

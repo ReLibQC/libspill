@@ -1,4 +1,4 @@
-/* libscratch POSIX backend -- internal structures. Not installed. */
+/* libspill POSIX backend -- internal structures. Not installed. */
 #ifndef LS_INTERNAL_H
 #define LS_INTERNAL_H
 
@@ -6,11 +6,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "libscratch.h"
+#include "libspill.h"
 
 #define LS_SUPER_SIZE  4096u          /* superblock, and the first data offset */
 #define LS_ALIGN       4096u          /* extent alignment; O_DIRECT needs it   */
-#define LS_MAGIC       "LSCRATCH"     /* 8 bytes, no NUL                       */
+#define LS_MAGIC       "LIBSPILL"     /* 8 bytes, no NUL                       */
 #define LS_FMT_VERSION 1u
 #define LS_BOUNCE      (4u << 20)     /* O_DIRECT staging chunk                */
 #define LS_MIN_EXTENT  (64u << 10)    /* below this a hole is not worth taking */

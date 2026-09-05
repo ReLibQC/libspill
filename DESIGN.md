@@ -1,4 +1,4 @@
-# libscratch — design sketch
+# libspill — design sketch
 
 **Start here.** Every design question is settled; what remains is implementation
 and one measurement. The ABI-level consequences of those decisions — error
@@ -382,7 +382,7 @@ for (auto &k : s.keys()) ...
 array when the caller wants to control allocation:
 
 ```python
-with libscratch.open("scratch", memory_budget=8<<30) as s:
+with libspill.open("scratch", memory_budget=8<<30) as s:
     s["t2"] = amps                                  # whole record
     blk = s.read("t2", offset=o, shape=(n, m))      # -> ndarray
     s.read("t2", offset=o, out=buf)                 # no allocation
@@ -407,7 +407,7 @@ them.
 
 §4 sketches the calls; this settles the parts a second implementer would
 otherwise have to guess, and which cannot be changed later without breaking
-every consumer. `include/libscratch.h` is the normative form. Six questions were
+every consumer. `include/libspill.h` is the normative form. Six questions were
 open, and two of them were defects rather than omissions.
 
 **Errors are negated errno, with our own codes below -1000.** No global error
@@ -627,7 +627,7 @@ primary targets.
    design, describing this design's contract.
 2. **A conformance target.** `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` is a strict subset
    of our API — the same calls with the offset in 64-bit words rather than bytes.
-   A shim implementing crayio over libscratch, exercised against one of these
+   A shim implementing crayio over libspill, exercised against one of these
    codes' test suites, is a cheap and genuine validation that the API is
    sufficient for the word-addressed workload, without requiring anyone to merge
    it. Worth doing in `tests/`; not worth counting as adoption.
@@ -656,7 +656,7 @@ rather than a family, and §7's validation plan should reflect that.
 
 ## 6b. The Psi4 port, measured
 
-`port/psi4/` reimplements libpsio's entry points on libscratch. Psi4's `psio.h`
+`port/psi4/` reimplements libpsio's entry points on libspill. Psi4's `psio.h`
 and `psio.hpp` are unchanged, so **no consumer call site changes at all** --
 which is the §7 criterion stated as a number rather than a hope. Measured
 against the Psi4 tree at `a0e6ba5c4`:
@@ -683,7 +683,7 @@ rather than assumed:
    hands the pointer to Python.
 3. **The on-disk table of contents is nobody's business.** `rd_toclen`,
    `tocread` and `toclen` have no consumers outside libpsio and `tocwrite` has
-   one, so libscratch owning the table costs Psi4 nothing.
+   one, so libspill owning the table costs Psi4 nothing.
 
 **`zero_disk` is the clearest single gain.** Psi4 writes `rows * cols` zeroed
 doubles one row at a time -- `rows` separate calls through the whole stack. The
@@ -720,7 +720,7 @@ port.
 
 ## 6c. The OpenMolcas port, and why it is not the Psi4 port
 
-`fortran/libscratch.F90` is the `ISO_C_BINDING` module §4a promises; it did not
+`fortran/libspill.F90` is the `ISO_C_BINDING` module §4a promises; it did not
 exist before this port needed it. `port/openmolcas/` reimplements the DaFile
 family over it. Measured against the tree at `dc523670f`:
 
@@ -749,7 +749,7 @@ one could not.
 
 **Two things disappear by construction.** `Multi_File`/`MaxFileSize` striping --
 `mpdafile.F90` and friends, 328 lines and 23 references -- exists because a unit
-could outgrow a file; a libscratch store has no such limit. This is the same bug
+could outgrow a file; a libspill store has no such limit. This is the same bug
 class §6a deletes from crayio's fixed `max_file` table, arrived at independently.
 And the shared position array `Addr()` that §5a identifies as unguarded across
 some 672 call sites has no counterpart at all: `pread`/`pwrite` carry no file
@@ -825,7 +825,7 @@ disqualifies it for this role however fast it is.
 None of which is a criticism. ADIOS2 is built for output, checkpointing and
 in-situ or streaming coupling — exactly the *durable* half that §3 excludes, and
 append-only is the right model for that job. The two are complementary: a code
-could reasonably use libscratch for within-run temporaries and ADIOS2 or HDF5
+could reasonably use libspill for within-run temporaries and ADIOS2 or HDF5
 for everything it keeps.
 
 ## 7b. HDF5: right semantics, wrong space behaviour — an optional backend
@@ -869,7 +869,7 @@ selections give strided sub-block access, `H5F_ACC_RDWR` gives read-modify-write
 and space is reused rather than appended. It also already ships C, Fortran and
 Python bindings, and most of the target codes already link it.
 
-So libscratch should not be a storage implementation. What remains to build is
+So libspill should not be a storage implementation. What remains to build is
 comparatively small:
 
 1. **A narrow API.** HDF5's surface is large and its defaults are wrong for this
@@ -937,7 +937,7 @@ and exciting in 428, this is not a difference of degree. It shows the
 concentrated layer is reachable at production scale, and it is the closest thing
 in the corpus to what this library's callers would look like after adoption.
 
-eT correspondingly does not *need* libscratch. It is the model, not a target.
+eT correspondingly does not *need* libspill. It is the model, not a target.
 
 ## 7e. Blosc2: compression does not pay on this data
 
@@ -985,11 +985,11 @@ this machine `/tmp` is a *tmpfs*, so every number taken there describes RAM.
 Everything below is on the ext4 filesystem with `O_DIRECT`, except where the
 memory tier is the thing being measured.
 
-**Space under churn** (`tests/churn_libscratch.c`, the protocol of
+**Space under churn** (`tests/churn_libspill.c`, the protocol of
 `tests/hdf5_churn_varsize.py` exactly: 8 records, 60 cycles, each recreated at a
 different random size):
 
-| | default | fsm | page | libscratch |
+| | default | fsm | page | libspill |
 |---|---|---|---|---|
 | file / live | x1.61 | x1.75 | x1.37 | **x1.13** |
 
@@ -1003,9 +1003,9 @@ so the file kept its high-water mark.
 **Overlap** (`bench/ooc_bench.c`; 48 blocks x 8 MiB, read-compute-write per
 block, medians of 5 interleaved repetitions). Four variants, because two
 different things need measuring: raw POSIX synchronous (A) is what libpsio does
-today, libscratch synchronous (D) is A plus our overhead, raw POSIX with a
+today, libspill synchronous (D) is A plus our overhead, raw POSIX with a
 hand-rolled prefetch thread (B) is what a careful caller writes for itself, and
-libscratch async (C) is the library. **B, not A, is the honest baseline** --
+libspill async (C) is the library. **B, not A, is the honest baseline** --
 measuring against A alone would credit the library with an overlap any competent
 caller could have written.
 
@@ -1023,7 +1023,7 @@ caller could have written.
 
 **The memory tier is the largest win, as §5.2 predicted** (budget covering the
 working set, against buffered raw I/O with the cache dropped between passes):
-libscratch is **29% faster than the hand-rolled prefetch and 54% faster than raw
+libspill is **29% faster than the hand-rolled prefetch and 54% faster than raw
 synchronous**, because it does no disk I/O at all. This is the one number here
 that does not need a quiet machine to be believed, and it is the easiest thing
 for an adopter to gain.
@@ -1058,7 +1058,7 @@ HDF5 partly on heap corruption at two threads.
 - ~~Error model, `ENOSPC` and partial transfers, `ls_keys` ownership, table-of-
   contents locking, the missing communicator on `LS_SHARED_MPIIO`, and the
   undefined `LS_MAPPED` combinations~~ **settled in §4b**, and expressed in
-  `include/libscratch.h`. Two of the six were defects in §4, not omissions: the
+  `include/libspill.h`. Two of the six were defects in §4, not omissions: the
   struct had no backend or mode member at all, and §5a's distinct-key guarantee
   was unimplementable without a lock on the table of contents.
 

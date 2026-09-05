@@ -17,7 +17,7 @@ program test_dafile_shim
   if (len_trim(dir) == 0) dir = '/tmp'
   call daf_ls_set_dir(trim(dir))
 
-  write(6,'(a)') 'OpenMolcas DaFile shim on libscratch'
+  write(6,'(a)') 'OpenMolcas DaFile shim on libspill'
 
   do i = 1, 4096
     a(i) = 1.0d0 + 0.25d0 * i

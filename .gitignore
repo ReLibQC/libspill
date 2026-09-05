@@ -1,10 +1,14 @@
-libscratch.a
+# Build products. Patterns rather than names: renaming a target used to leave
+# its old binary behind for `git add -A` to find, which is how libscratch.a and
+# tests/churn_libscratch reached a commit.
+*.a
 *.o
 *.d
+*.mod
+
 tests/abi_header_test
 tests/test_posix
-tests/churn_libscratch
+tests/churn_libspill
 bench/ooc_bench
-fortran/*.mod
-port/openmolcas/test_dafile_shim
 port/psi4/test_psio_shim
+port/openmolcas/test_dafile_shim

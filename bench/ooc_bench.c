@@ -8,11 +8,11 @@
  * Four variants, because two separate things need measuring:
  *
  *   A  raw POSIX, synchronous       what libpsio does today -- the thing to beat
- *   D  libscratch, synchronous      A plus our overhead; the wrapper's cost
+ *   D  libspill, synchronous      A plus our overhead; the wrapper's cost
  *   B  raw POSIX, hand-rolled       a careful caller's own double buffering:
  *      prefetch                     one helper thread reads block b+1 while the
  *                                   main thread computes on block b
- *   C  libscratch, asynchronous     ls_aread/ls_awrite, depth 2
+ *   C  libspill, asynchronous     ls_aread/ls_awrite, depth 2
  *
  * A vs D is the honest cost of the abstraction. B vs C is the honest gain,
  * because measuring against A alone would credit the library with an overlap
@@ -33,7 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "libscratch.h"
+#include "libspill.h"
 
 static size_t NBLK   = 64;
 static size_t BLKMIB = 8;
@@ -346,9 +346,9 @@ int main(int argc, char **argv)
 
         printf("  %-34s %10s   %12s   %s\n", "variant", "median", "effective", "[min-max]");
         report("A raw POSIX, synchronous",   vA, REPS, bytes);
-        report("D libscratch, synchronous",  vD, REPS, bytes);
+        report("D libspill, synchronous",  vD, REPS, bytes);
         report("B raw POSIX, hand prefetch", vB, REPS, bytes);
-        report("C libscratch, async",        vC, REPS, bytes);
+        report("C libspill, async",        vC, REPS, bytes);
 
         tA = median(vA, REPS); tB = median(vB, REPS);
         tC = median(vC, REPS); tD = median(vD, REPS);
@@ -358,7 +358,7 @@ int main(int argc, char **argv)
     printf("\n  abstraction cost   A -> D  %+6.1f%%\n", 100.0 * (tD - tA) / tA);
     printf("  overlap, by hand   A -> B  %+6.1f%%\n", 100.0 * (tB - tA) / tA);
     printf("  overlap, library   D -> C  %+6.1f%%\n", 100.0 * (tC - tD) / tD);
-    printf("  the honest number  B -> C  %+6.1f%%   (negative = libscratch wins)\n",
+    printf("  the honest number  B -> C  %+6.1f%%   (negative = libspill wins)\n",
            100.0 * (tC - tB) / tB);
     printf("\n  checksum %.6e\n", chk);
     free(buf);

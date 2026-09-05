@@ -77,9 +77,9 @@ static char *build_path(const char *name, const ls_opts *o)
     if (!p) return NULL;
 
     if (o->parallel == LS_PER_RANK)
-        snprintf(p, n, "%s/%s.r%d.libscratch", dir, name, resolve_rank(o->rank));
+        snprintf(p, n, "%s/%s.r%d.libspill", dir, name, resolve_rank(o->rank));
     else
-        snprintf(p, n, "%s/%s.libscratch", dir, name);
+        snprintf(p, n, "%s/%s.libspill", dir, name);
     return p;
 }
 

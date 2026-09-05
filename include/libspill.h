@@ -1,4 +1,4 @@
-/* libscratch -- scratch and out-of-core I/O for electronic-structure codes.
+/* libspill -- scratch and out-of-core I/O for electronic-structure codes.
  *
  * This header is the ABI. The C layer exists for reach -- Fortran, Python, and
  * a stable ABI -- not because anyone should enjoy writing against it; see
@@ -6,8 +6,8 @@
  *
  * C99. No global state, no initialisation call, no thread-local storage.
  */
-#ifndef LIBSCRATCH_H
-#define LIBSCRATCH_H
+#ifndef LIBSPILL_H
+#define LIBSPILL_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -33,7 +33,7 @@ const char *ls_version_string(void);
  * codes occupy two disjoint ranges:
  *
  *   -1 .. -999    an OS errno, negated: -ENOSPC, -EIO, -EACCES, -EDQUOT.
- *   -1000 ..      a libscratch condition, enumerated below.
+ *   -1000 ..      a libspill condition, enumerated below.
  *
  * There is no errno-like global and no per-store last-error slot. The return
  * value is the entire report, which is what lets every entry point be called
@@ -214,4 +214,4 @@ int ls_test  (ls_req *req, int *done);
 #ifdef __cplusplus
 }   /* extern "C" */
 #endif
-#endif /* LIBSCRATCH_H */
+#endif /* LIBSPILL_H */

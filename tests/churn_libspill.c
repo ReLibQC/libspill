@@ -12,7 +12,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "libscratch.h"
+#include "libspill.h"
 
 #define NREC   8
 #define CYCLES 60
@@ -59,13 +59,13 @@ int main(void)
     }
     for (i = 0; i < NREC; i++) live += (unsigned long long)sizes[i] * sizeof *buf;
 
-    snprintf(path, sizeof path, "%s/churn.libscratch", dir);
+    snprintf(path, sizeof path, "%s/churn.libspill", dir);
     if (stat(path, &st) == 0) fsz = (unsigned long long)st.st_size;
     ls_close(s, 0);
     free(buf);
 
     printf("  %-22s file %7.1f MiB   live %6.1f MiB   x%5.2f\n",
-           "libscratch POSIX", fsz / 1048576.0, live / 1048576.0,
+           "libspill POSIX", fsz / 1048576.0, live / 1048576.0,
            live ? (double)fsz / (double)live : 0.0);
 
     /* HDF5's best on this protocol was x1.37. Anything at or above that would

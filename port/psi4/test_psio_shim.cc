@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "psio_libscratch.h"
+#include "psio_libspill.h"
 
 using namespace psi;
 
@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     psio_init();
 
     const size_t UNIT = 35;                       /* PSIF_CC_TAMPS, in Psi4 */
-    std::printf("Psi4 libpsio shim on libscratch (scratch: %s)\n", dir);
+    std::printf("Psi4 libpsio shim on libspill (scratch: %s)\n", dir);
 
     /* ---- whole-entry round trip, the read_entry/write_entry pattern ---- */
     psio_open(UNIT, PSIO_OPEN_NEW);

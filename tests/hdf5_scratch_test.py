@@ -5,7 +5,7 @@ Same questions put to ADIOS2 in adios_rmw_test.py, which failed all three:
 read-back inside one open write session, in-place overwrite, and partial
 sub-range update -- with storage growing linearly in the number of updates.
 
-If HDF5 passes, libscratch becomes a thin facade over an existing dependency
+If HDF5 passes, libspill becomes a thin facade over an existing dependency
 that most of these codes already link, rather than a new implementation.
 """
 import os, shutil, tempfile, time

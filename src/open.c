@@ -76,6 +76,8 @@ static char *build_path(const char *name, const ls_opts *o)
     p = malloc(n);
     if (!p) return NULL;
 
+    /* LS_SHARED deliberately does NOT fold in the rank: every process must
+     * name the same file. */
     if (o->parallel == LS_PER_RANK)
         snprintf(p, n, "%s/%s.r%d.libspill", dir, name, resolve_rank(o->rank));
     else
@@ -93,7 +95,7 @@ static int toc_serialise(ls_store *s, unsigned char **out, size_t *outn)
     for (i = 0; i < s->nbuckets; i++) {
         ls_rec *r;
         for (r = s->tab[i]; r; r = r->hnext)
-            need += 4 + strlen(r->key) + 8 + 4 + 16 * r->next;
+            need += 4 + strlen(r->key) + 8 + 4 + r->attrlen + 4 + 16 * r->next;
     }
     b = malloc(need ? need : 1);
     if (!b) return -ENOMEM;
@@ -106,6 +108,8 @@ static int toc_serialise(ls_store *s, unsigned char **out, size_t *outn)
             put32(w, (uint32_t)kl);            w += 4;
             memcpy(w, r->key, kl);             w += kl;
             put64(w, r->size);                 w += 8;
+            put32(w, r->attrlen);              w += 4;
+            if (r->attrlen) { memcpy(w, r->attr, r->attrlen); w += r->attrlen; }
             put32(w, (uint32_t)r->next);       w += 4;
             for (e = 0; e < r->next; e++) {
                 put64(w, r->ext[e].foff);      w += 8;
@@ -130,13 +134,18 @@ static int toc_load(ls_store *s, const unsigned char *b, size_t n, uint64_t coun
 
         if (end - w < 4) return LS_ERR_CORRUPT;
         kl = get32(w); w += 4;
-        if (kl == 0 || kl > LS_KEY_MAX || (size_t)(end - w) < kl + 12u)
+        if (kl == 0 || kl > LS_KEY_MAX || (size_t)(end - w) < kl + 8u)
             return LS_ERR_CORRUPT;
         memcpy(key, w, kl); key[kl] = '\0'; w += kl;
 
         r = ls_toc_insert(s, key);
         if (!r) return -ENOMEM;
         r->size = get64(w); w += 8;
+        if (end - w < 4) return LS_ERR_CORRUPT;
+        r->attrlen = get32(w); w += 4;
+        if (r->attrlen > LS_ATTR_MAX || (size_t)(end - w) < r->attrlen + 4u)
+            return LS_ERR_CORRUPT;
+        if (r->attrlen) { memcpy(r->attr, w, r->attrlen); w += r->attrlen; }
         ne = get32(w); w += 4;
         if ((size_t)(end - w) < (size_t)ne * 16u) return LS_ERR_CORRUPT;
         for (e = 0; e < ne; e++) {
@@ -224,6 +233,13 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
         if (err) *err = LS_ERR_INVAL;
         return NULL;
     }
+    /* A per-process memory tier would keep writes where the other processes
+     * cannot see them. In a shared store that is a correctness failure, not a
+     * tuning choice, so it is refused rather than ignored. */
+    if (o.parallel == LS_SHARED && o.memory_budget != 0) {
+        if (err) *err = LS_ERR_INVAL;
+        return NULL;
+    }
     if (o.backend == LS_HDF5) { if (err) *err = LS_ERR_BACKEND; return NULL; }
     if (o.mode    == LS_MAPPED) { if (err) *err = LS_ERR_MODE;  return NULL; }
 
@@ -294,6 +310,12 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
     } else if (st.st_size > 0) {
         rc = LS_ERR_CORRUPT;
         goto fail;
+    } else if (o.parallel == LS_SHARED) {
+        /* Nothing to share. The layout is frozen in this mode, so there is no
+         * way for this process to create records the others would agree on;
+         * saying so is better than opening an empty store that fails later. */
+        rc = -ENOENT;
+        goto fail;
     } else if (ftruncate(s->fd, (off_t)LS_SUPER_SIZE) != 0) {
         rc = -errno;
         goto fail;
@@ -324,7 +346,12 @@ int ls_close(ls_store *s, int keep)
 
     ls_pool_stop(s);                    /* drains in flight, as fclose flushes */
 
-    if (keep) {
+    /* A shared store belongs to whoever created it. Every process closing one
+     * would race to rewrite the same table of contents, and with keep=0 each
+     * would try to unlink a file the others are still reading. */
+    if (s->o.parallel == LS_SHARED) keep = 1;
+
+    if (keep && s->o.parallel != LS_SHARED) {
         unsigned char *tb = NULL, sb[LS_SUPER_SIZE];
         size_t tn = 0;
 
@@ -361,6 +388,8 @@ int ls_close(ls_store *s, int keep)
     pthread_mutex_destroy(&s->alloc_lk);
     pthread_mutex_destroy(&s->q_lk);
     pthread_cond_destroy(&s->q_cv);
+    for (i = 0; i < s->nretired; i++) free(s->retired[i]);
+    free(s->retired);
     free(s->fl);
     free(s->tab);
     free(s->path);

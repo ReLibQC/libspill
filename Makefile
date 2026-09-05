@@ -20,7 +20,8 @@ SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
 OBJ  := $(SRC:.c=.o)
 LIB  := libspill.a
 
-TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill
+TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
+         tests/test_surveyed
 BENCH := bench/ooc_bench
 
 # Psi4's libpsio reimplemented on libspill. Built here so the port is tested

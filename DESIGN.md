@@ -259,6 +259,70 @@ Recording these sharpens the boundary as much as the additions do.
 | GPAW | `.npy` `mmap_mode='c'` compatibility | external consumer scripts depend on the format |
 | Conquest | the EXX ERI cache | "the design intent is the opposite of a store: it exists specifically to avoid I/O" |
 
+## 3b. §3a implemented — and one claim it overstates
+
+All five requests are answered in `include/libspill.h`, with 44 checks in
+`tests/test_surveyed.c`. Four needed code; the fifth needed only a sentence.
+
+| §3a | codes | answer |
+|---|---|---|
+| (1) concurrent disjoint ranges | 7 | `LS_SHARED`, a third `ls_parallel` value |
+| (2) append returning its offset | 3 | `ls_append` |
+| (3) opaque attribute blob | 5 | `ls_set_attr` / `ls_get_attr`, capped at 256 bytes |
+| (4) scatter/gather | 3 | `ls_readv` / `ls_writev` over an `ls_seg` list |
+| (5) tuple keys | 3 | string keys already grant it; nothing to build |
+
+Three notes on what implementing them taught.
+
+**`ls_readv`/`ls_writev` supersede the strided pair §4 deferred**, rather than
+joining it. A regular stride is a segment list with a regular offset, and the
+segment list also expresses the scatter cases a strided call cannot. One list is
+one table-of-contents lookup, which against Conquest's "thousands of individual
+scalar operations per file" is most of the gain on its own.
+
+**`LS_SHARED` needs one restriction §3a does not mention, and it is not
+negotiable.** Every process must agree on where each record lives, and nothing
+in this mode negotiates that — so **the layout is frozen**: one process creates
+the store and reserves the keys, closes with `keep=1`, the caller barriers, and
+then everyone opens `LS_SHARED`. In that mode `ls_reserve`, `ls_erase`,
+`ls_append`, `ls_set_attr` and any write past a record's existing size return
+`LS_ERR_MODE`, because each would allocate space the other processes cannot see.
+`memory_budget` must be zero for the same reason, and that one is a correctness
+requirement rather than a tuning choice: a per-process memory tier would hold
+writes where no other process could read them. The mode is exercised across four
+real processes, not simulated in one.
+
+**§3a(2) overstates the OpenMolcas case, and the port is the evidence.** It says
+the cursor idiom "sits under all 2200 `dDaFile`/`iDaFile` call sites. Without a
+matching primitive, the port is a rewrite; with one, it is mechanical." The port
+in §6c was written before `ls_append` existed and is mechanical anyway, with 13
+passing checks — because `iDisk` is an *inout* parameter, so the caller always
+holds the offset and hands it back. §8 settled this already: "the cursor is an
+offset the caller already holds."
+
+That does not make `ls_append` unnecessary; it makes its justification a
+different one. What it genuinely provides is **atomicity**: the offset is taken
+and the record extended under one lock, so six threads appending to one key get
+six disjoint ranges. `ls_size` followed by `ls_write` cannot do that, and no
+caller can build it. APE's record framing and ABINIT's row-by-row growth are the
+cases that want it; OpenMolcas is not.
+
+**And implementing it exposed a race that predates it.** §4b promises that
+concurrent operations on one key are safe as long as the *ranges* do not
+overlap; the data path was walking a record's extent list after releasing the
+table-of-contents lock, while another thread could `realloc` that list out from
+under it. Six threads appending to one key found it immediately under helgrind.
+The extent array is now replaced rather than resized when it grows, with the old
+one retired to the store until close, and a reader takes its `(pointer, count)`
+snapshot while it still holds the lock. Writing at index `count` stays safe
+unlocked, because no snapshot includes it. `tests/test_posix` and
+`tests/test_surveyed` are both clean under helgrind and memcheck.
+
+The general lesson is worth keeping: **a contract that permits concurrency on
+one key is a contract about that key's metadata too**, not only about its bytes.
+Disjoint ranges are not disjoint if reaching them means reading a structure
+someone else is rewriting.
+
 ## 4. API sketch (C core)
 
 Opaque handles; no global unit registry; thread-safe; no init call.

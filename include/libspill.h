@@ -77,14 +77,43 @@ typedef enum {
 
 typedef enum {
     LS_LOCAL    = 0,  /* one store, one process                              */
-    LS_PER_RANK = 1   /* rank folded into the path, following CP2K's HFX     */
+    LS_PER_RANK = 1,  /* rank folded into the path, following CP2K's HFX     */
+    LS_SHARED   = 2   /* one file, many processes, disjoint ranges           */
 } ls_parallel;
-/* There is deliberately no shared-file / collective policy. DESIGN.md 5a
- * settles cross-process sharing as out of scope -- isolation instead -- and a
- * communicator argument would put MPI in the dependency set of a library whose
- * default backend has none. */
+/* LS_SHARED answers §3a(1), which seven codes asked for -- BigDFT, DFT-FE,
+ * MOLGW, Octopus, QE/EPW, yambo and SIESTA all want ranks to write disjoint
+ * ranges of one key. It carries no MPI dependency: pwrite already provides
+ * everything the mode promises, and the barrier stays in the caller, where
+ * MADNESS, SIESTA and Conquest each independently said their fan-out logic has
+ * to live anyway.
+ *
+ * The contract, stated negatively as §3a asks:
+ *
+ *   - ranges written by different processes must be DISJOINT. Overlap is not
+ *     detected and not defined.
+ *   - there is no implied ordering between processes.
+ *   - a write is visible to another process only after the caller's own
+ *     synchronisation. The library performs none.
+ *
+ * And one requirement §3a does not state, which falls out of the
+ * implementation: **the layout is frozen**. Every process must agree on where
+ * each record lives, and nothing in this mode negotiates that, so the store
+ * must already contain the records. The protocol is: one process creates the
+ * store and ls_reserves the keys, closes it with keep=1, the caller barriers,
+ * and then every process opens LS_SHARED. In that mode ls_reserve, ls_erase,
+ * ls_append and ls_set_attr return LS_ERR_MODE, and a write past a record's
+ * existing size does too -- because any of them would allocate space the other
+ * processes cannot see.
+ *
+ * memory_budget must be 0 for the same reason: a per-process memory tier would
+ * hold writes where no other process could read them, which is not a
+ * performance question but a correctness one.
+ *
+ * This does not contradict §5a. That settles intra-process concurrency;
+ * positional I/O is the primitive here too. */
 
 #define LS_KEY_MAX    255u   /* bytes in a key, excluding the NUL           */
+#define LS_ATTR_MAX   256u   /* bytes in a key's attribute blob             */
 #define LS_OPTS_VERSION 1u
 
 /* Called on every failure, before the code is returned, with whatever context
@@ -198,15 +227,65 @@ int ls_aread (ls_store *s, const char *key, uint64_t off, size_t n,
 int ls_wait  (ls_req *req);
 int ls_test  (ls_req *req, int *done);
 
+/* ------------------------------------------------------------------ append
+ * Writes at the key's current end and reports where that was. The offset is
+ * taken and the record extended under one lock, so two threads appending to one
+ * key get two disjoint ranges rather than a race -- which a caller cannot build
+ * out of ls_size plus ls_write.
+ *
+ * §3a(2): OpenMolcas's iDisk is "an opaque running cursor: the caller does not
+ * supply an independently-computed offset -- it obtains one from a prior call's
+ * output and the callee auto-advances", under all 2200 of its call sites. Also
+ * APE's record framing and ABINIT's row-by-row growth. */
+int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
+              uint64_t *off_out);
+
+/* ------------------------------------------------------------ vectored I/O
+ * One call, one table-of-contents lookup, many ranges of one record. Segments
+ * whose file offsets turn out to be adjacent are issued as a single preadv or
+ * pwritev; the rest go one at a time.
+ *
+ * §3a(4): Serenity needs "in-place strided partial update without either
+ * read-modify-write (defeats the purpose -- these are large vectors) or the
+ * caller buffering the whole vector", and Conquest performs "thousands of
+ * individual scalar operations per file instead of one bulk record". A segment
+ * list expresses both, and a regular stride is just a segment list with a
+ * regular offset -- which is why this supersedes the ls_write_strided sketched
+ * in §4 rather than joining it. */
+typedef struct {
+    uint64_t off;        /* offset within the record */
+    size_t   len;
+    void    *buf;        /* read: destination. write: source, not modified */
+} ls_seg;
+
+int ls_readv (ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
+int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
+
+/* -------------------------------------------------------------- attributes
+ * A bounded opaque blob beside a key, capped at LS_ATTR_MAX and never
+ * interpreted. §3a(3): ERKALE, VeloxChem, ChronusQ, yambo and MRChem all want
+ * to keep shape and dtype next to the bytes.
+ *
+ * This is not self-description and must not become it. The store defines no
+ * schema, does not parse the blob, and will not grow one that outlives the
+ * cap -- §3's refusal to know what a tensor is survives exactly because the
+ * concession is bounded and opaque.
+ *
+ * ls_get_attr takes *n as the caller's capacity and sets it to the length
+ * stored. A short buffer gets LS_ERR_RANGE with *n set to what was needed; a
+ * NULL buffer just reports the length. */
+int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n);
+int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
+
 /* Not in this version, and shaped here so that adding them stays ABI-compatible
  * (new functions, new enum values, new trailing ls_opts members):
  *
  *   ls_map / ls_unmap        LS_MAPPED mode. DESIGN.md 3.
  *   ls_accumulate            with ls_reduce and the supplied ls_add_f64/f32.
- *   ls_read_strided,         a symmetric pair; the sketch had only the write
- *   ls_write_strided         half. No async form: the strided and asynchronous
- *                            paths compose badly and nothing in the corpus
- *                            asks for both at once.
+ *   ls_read_strided,         superseded by ls_readv/ls_writev above: a regular
+ *   ls_write_strided         stride is a segment list with a regular offset,
+ *                            and the segment list also serves the scatter cases
+ *                            the strided pair could not.
  *   ls_prefetch              a hint, meaningless until there is a cache to
  *                            prefetch into.
  */

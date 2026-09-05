@@ -11,7 +11,7 @@
 #define LS_SUPER_SIZE  4096u          /* superblock, and the first data offset */
 #define LS_ALIGN       4096u          /* extent alignment; O_DIRECT needs it   */
 #define LS_MAGIC       "LIBSPILL"     /* 8 bytes, no NUL                       */
-#define LS_FMT_VERSION 1u
+#define LS_FMT_VERSION 2u   /* 2 added the per-key attribute blob      */
 #define LS_BOUNCE      (4u << 20)     /* O_DIRECT staging chunk                */
 #define LS_MIN_EXTENT  (64u << 10)    /* below this a hole is not worth taking */
 #define LS_MAX_EXTENTS 8u             /* scatter-list bound; past it, use the tail */
@@ -33,6 +33,8 @@ typedef struct ls_rec {
     uint64_t       mem_cap;
 
     size_t         busy;              /* in-flight ops; eviction skips these   */
+    unsigned char  attr[LS_ATTR_MAX];  /* §3a(3): opaque, never interpreted    */
+    uint32_t       attrlen;
     ls_extent     *ext;               /* in logical order; covers >= size      */
     size_t         next, ncap;
     uint64_t       ext_total;
@@ -57,6 +59,8 @@ struct ls_store {
     /* extent allocator: free list sorted by offset, coalescing on release */
     pthread_mutex_t  alloc_lk;
     int              teardown;        /* in ls_close: stop recycling extents   */
+    ls_extent      **retired;         /* extent arrays a reader may still hold */
+    size_t           nretired, retcap;
     ls_hole         *fl;
     size_t           nfl, flcap;
     uint64_t         file_end;
@@ -116,6 +120,18 @@ int     ls_key_ok     (const char *key);
 /* store.c -- shared by the sync and async paths */
 int  ls_rw (ls_store *s, const char *key, uint64_t off, size_t n,
             void *rbuf, const void *wbuf, int op);
+/* A snapshot of where a record's bytes are, taken under toc_lk and used after
+ * it is released. Extent arrays are never mutated in place once published, so
+ * a snapshot stays valid for as long as the store lives. */
+typedef struct {
+    unsigned char *mem;
+    ls_extent     *ext;
+    size_t         next;
+} ls_place;
+
+void ls_place_of(const ls_rec *r, ls_place *p);          /* toc_lk held */
+int  ls_scatter(ls_store *s, const ls_place *p, uint64_t off, size_t n,
+                void *rbuf, const void *wbuf, int op);
 int  ls_pread_all  (ls_store *s, void *buf, size_t n, uint64_t off);
 int  ls_pwrite_all (ls_store *s, const void *buf, size_t n, uint64_t off);
 

@@ -209,17 +209,46 @@ int ls_spill_all(ls_store *s)
 
 /* ---------------------------------------------------------------- capacity */
 
-static int ext_push(ls_rec *r, ls_extent e)
+/* Growing a record's extent list must not move it: another thread may be part
+ * way through an I/O using a snapshot of the old array, taken under toc_lk and
+ * held across the transfer. So the array is replaced rather than realloc'd, and
+ * the old one is retired to the store until close. Writing at index r->next is
+ * safe unlocked -- a snapshot's count never includes it. */
+static int ext_retire(ls_store *s, ls_extent *old)
+{
+    if (!old) return LS_OK;
+    if (s->nretired == s->retcap) {
+        size_t cap = s->retcap ? s->retcap * 2 : 8;
+        ls_extent **p = realloc(s->retired, cap * sizeof *p);
+        if (!p) return -ENOMEM;
+        s->retired = p;
+        s->retcap = cap;
+    }
+    s->retired[s->nretired++] = old;
+    return LS_OK;
+}
+
+static int ext_push(ls_store *s, ls_rec *r, ls_extent e)
 {
     if (r->next == r->ncap) {
         size_t cap = r->ncap ? r->ncap * 2 : 4;
-        ls_extent *p = realloc(r->ext, cap * sizeof *p);
+        ls_extent *p = malloc(cap * sizeof *p);
         if (!p) return -ENOMEM;
+        if (r->next) memcpy(p, r->ext, r->next * sizeof *p);
+        if (ext_retire(s, r->ext) != LS_OK) { free(p); return -ENOMEM; }
         r->ext = p;
         r->ncap = cap;
     }
-    r->ext[r->next++] = e;
+    r->ext[r->next] = e;
+    r->next++;
     return LS_OK;
+}
+
+void ls_place_of(const ls_rec *r, ls_place *p)
+{
+    p->mem  = r->mem;
+    p->ext  = r->ext;
+    p->next = r->next;
 }
 
 static int ensure_extents(ls_store *s, ls_rec *r, uint64_t need)
@@ -240,7 +269,7 @@ static int ensure_extents(ls_store *s, ls_rec *r, uint64_t need)
 
         rc = zero_range(s, e.foff, e.len);
         if (rc != LS_OK) { ls_free_extents(s, &e, 1); return rc; }
-        rc = ext_push(r, e);
+        rc = ext_push(s, r, e);
         if (rc != LS_OK) { ls_free_extents(s, &e, 1); return rc; }
         r->ext_total += e.len;
     }
@@ -285,22 +314,24 @@ static int ensure_cap(ls_store *s, ls_rec *r, uint64_t need)
 
 /* -------------------------------------------------------------- data path */
 
-static int scatter(ls_store *s, ls_rec *r, uint64_t off, size_t n,
-                   void *rbuf, const void *wbuf, int op)
+int ls_scatter(ls_store *s, const ls_place *p, uint64_t off, size_t n,
+               void *rbuf, const void *wbuf, int op)
 {
     unsigned char *out = rbuf;
     const unsigned char *in = wbuf;
     uint64_t base = 0;
     size_t i, done = 0;
 
-    if (r->mem) {
-        if (op == LS_OP_WRITE) memcpy(r->mem + off, in, n);
-        else                   memcpy(out, r->mem + off, n);
+    if (n == 0) return LS_OK;
+
+    if (p->mem) {
+        if (op == LS_OP_WRITE) memcpy(p->mem + off, in, n);
+        else                   memcpy(out, p->mem + off, n);
         return LS_OK;
     }
 
-    for (i = 0; i < r->next && done < n; i++) {
-        uint64_t elo = base, ehi = base + r->ext[i].len;
+    for (i = 0; i < p->next && done < n; i++) {
+        uint64_t elo = base, ehi = base + p->ext[i].len;
         base = ehi;
         if (off + done >= ehi) continue;
         {
@@ -309,8 +340,8 @@ static int scatter(ls_store *s, ls_rec *r, uint64_t off, size_t n,
             int rc;
             if (k > n - done) k = n - done;
             rc = (op == LS_OP_WRITE)
-                ? ls_pwrite_all(s, in + done, k, r->ext[i].foff + within)
-                : ls_pread_all (s, out + done, k, r->ext[i].foff + within);
+                ? ls_pwrite_all(s, in + done, k, p->ext[i].foff + within)
+                : ls_pread_all (s, out + done, k, p->ext[i].foff + within);
             if (rc != LS_OK) return rc;
             done += k;
         }
@@ -321,7 +352,8 @@ static int scatter(ls_store *s, ls_rec *r, uint64_t off, size_t n,
 int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
           void *rbuf, const void *wbuf, int op)
 {
-    ls_rec *r;
+    ls_rec  *r;
+    ls_place pl;
     int rc = LS_OK;
 
     if (!s) return LS_ERR_INVAL;
@@ -340,6 +372,13 @@ int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
                                  ls_report(s, LS_ERR_RANGE, key, off, n, "read");
                                  return LS_ERR_RANGE; }
     } else {
+        if (s->o.parallel == LS_SHARED &&
+            (!r || off + n > r->size)) {     /* would change the layout */
+            pthread_mutex_unlock(&s->toc_lk);
+            ls_report(s, LS_ERR_MODE, key, off, n,
+                      "a shared store's layout is frozen; reserve it before sharing");
+            return LS_ERR_MODE;
+        }
         if (!r) r = ls_toc_insert(s, key);
         if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
         /* A write past the end leaves the gap zero-filled (§4b); fresh extents
@@ -354,9 +393,10 @@ int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
     }
     if (r->mem) ls_lru_touch(s, r);
     r->busy++;
+    ls_place_of(r, &pl);
     pthread_mutex_unlock(&s->toc_lk);
 
-    rc = scatter(s, r, off, n, rbuf, wbuf, op);
+    rc = ls_scatter(s, &pl, off, n, rbuf, wbuf, op);
 
     pthread_mutex_lock(&s->toc_lk);
     r->busy--;
@@ -399,6 +439,7 @@ int ls_erase(ls_store *s, const char *key)
 {
     ls_rec *r;
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
+    if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r) { ls_toc_unlink(s, r); ls_lru_drop(s, r); ls_rec_free(s, r); }
@@ -411,6 +452,7 @@ int ls_reserve(ls_store *s, const char *key, uint64_t nbytes)
     ls_rec *r;
     int rc;
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
+    if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
 
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
@@ -461,4 +503,166 @@ void ls_keys_free(char **keys, size_t n)
     if (!keys) return;
     for (i = 0; i < n; i++) free(keys[i]);
     free(keys);
+}
+
+/* ------------------------------------------------------------------ append */
+
+int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
+              uint64_t *off_out)
+{
+    ls_rec  *r;
+    ls_place pl;
+    uint64_t off;
+    int      rc;
+
+    if (!s || !ls_key_ok(key) || (n && !buf)) return LS_ERR_INVAL;
+    if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+
+    /* The offset is taken and the record extended under one lock. That is the
+     * whole point: ls_size followed by ls_write is not the same thing, because
+     * another thread can append in between. */
+    pthread_mutex_lock(&s->toc_lk);
+    r = ls_toc_find(s, key);
+    if (!r) r = ls_toc_insert(s, key);
+    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+
+    off = r->size;
+    if (off + n < off) { pthread_mutex_unlock(&s->toc_lk); return LS_ERR_RANGE; }
+
+    rc = ensure_cap(s, r, off + n);
+    if (rc != LS_OK) {
+        pthread_mutex_unlock(&s->toc_lk);
+        ls_report(s, rc, key, off, n, "reserving space for append");
+        return rc;
+    }
+    r->size = off + n;
+    if (r->mem) ls_lru_touch(s, r);
+    r->busy++;
+    ls_place_of(r, &pl);
+    pthread_mutex_unlock(&s->toc_lk);
+
+    rc = ls_scatter(s, &pl, off, n, NULL, buf, LS_OP_WRITE);
+
+    pthread_mutex_lock(&s->toc_lk);
+    r->busy--;
+    pthread_mutex_unlock(&s->toc_lk);
+
+    if (rc != LS_OK) ls_report(s, rc, key, off, n, "append");
+    else if (off_out) *off_out = off;
+    return rc;
+}
+
+/* ------------------------------------------------------------- vectored I/O */
+
+static int segv(ls_store *s, const char *key, const ls_seg *segs, size_t nseg, int op)
+{
+    ls_rec  *r;
+    ls_place pl;
+    size_t   i;
+    int      rc = LS_OK;
+    uint64_t hi = 0;
+
+    if (!s || !ls_key_ok(key) || (nseg && !segs)) return LS_ERR_INVAL;
+    if (nseg == 0) return LS_OK;
+
+    for (i = 0; i < nseg; i++) {
+        if (segs[i].len && !segs[i].buf) return LS_ERR_INVAL;
+        if (segs[i].off + segs[i].len < segs[i].off) return LS_ERR_RANGE;
+        if (segs[i].off + segs[i].len > hi) hi = segs[i].off + segs[i].len;
+    }
+
+    /* One lookup for the whole list. Against Conquest's "thousands of individual
+     * scalar operations per file", that alone is most of the gain. */
+    pthread_mutex_lock(&s->toc_lk);
+    r = ls_toc_find(s, key);
+
+    if (op == LS_OP_READ) {
+        if (!r) { pthread_mutex_unlock(&s->toc_lk);
+                  ls_report(s, LS_ERR_NOKEY, key, 0, 0, "readv");
+                  return LS_ERR_NOKEY; }
+        if (hi > r->size) { pthread_mutex_unlock(&s->toc_lk);
+                            ls_report(s, LS_ERR_RANGE, key, 0, 0, "readv");
+                            return LS_ERR_RANGE; }
+    } else {
+        if (s->o.parallel == LS_SHARED && (!r || hi > r->size)) {
+            pthread_mutex_unlock(&s->toc_lk);
+            ls_report(s, LS_ERR_MODE, key, 0, hi,
+                      "a shared store's layout is frozen; reserve it before sharing");
+            return LS_ERR_MODE;
+        }
+        if (!r) r = ls_toc_insert(s, key);
+        if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+        rc = ensure_cap(s, r, hi);
+        if (rc != LS_OK) { pthread_mutex_unlock(&s->toc_lk);
+                           ls_report(s, rc, key, 0, 0, "reserving space for writev");
+                           return rc; }
+        if (hi > r->size) r->size = hi;
+    }
+    if (r->mem) ls_lru_touch(s, r);
+    r->busy++;
+    ls_place_of(r, &pl);
+    pthread_mutex_unlock(&s->toc_lk);
+
+    for (i = 0; i < nseg && rc == LS_OK; i++)
+        rc = ls_scatter(s, &pl, segs[i].off, segs[i].len,
+                        op == LS_OP_READ ? segs[i].buf : NULL,
+                        op == LS_OP_READ ? NULL : segs[i].buf, op);
+
+    pthread_mutex_lock(&s->toc_lk);
+    r->busy--;
+    pthread_mutex_unlock(&s->toc_lk);
+
+    if (rc != LS_OK)
+        ls_report(s, rc, key, 0, 0, op == LS_OP_READ ? "readv" : "writev");
+    return rc;
+}
+
+int ls_readv(ls_store *s, const char *key, const ls_seg *segs, size_t nseg)
+{ return segv(s, key, segs, nseg, LS_OP_READ); }
+
+int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg)
+{ return segv(s, key, segs, nseg, LS_OP_WRITE); }
+
+/* -------------------------------------------------------------- attributes */
+
+int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n)
+{
+    ls_rec *r;
+
+    if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
+    if (n > LS_ATTR_MAX || (n && !blob)) return LS_ERR_INVAL;
+    if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+
+    pthread_mutex_lock(&s->toc_lk);
+    r = ls_toc_find(s, key);
+    if (!r) r = ls_toc_insert(s, key);
+    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (n) memcpy(r->attr, blob, n);
+    r->attrlen = (uint32_t)n;
+    pthread_mutex_unlock(&s->toc_lk);
+    return LS_OK;
+}
+
+int ls_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
+{
+    ls_rec *r;
+    int rc = LS_OK;
+
+    if (!s || !ls_key_ok(key) || !n) return LS_ERR_INVAL;
+
+    pthread_mutex_lock(&s->toc_lk);
+    r = ls_toc_find(s, key);
+    if (!r) {
+        rc = LS_ERR_NOKEY;
+    } else if (!blob) {
+        *n = r->attrlen;                 /* enquiry only */
+    } else if (*n < r->attrlen) {
+        *n = r->attrlen;                 /* tell the caller what it needs */
+        rc = LS_ERR_RANGE;
+    } else {
+        if (r->attrlen) memcpy(blob, r->attr, r->attrlen);
+        *n = r->attrlen;
+    }
+    pthread_mutex_unlock(&s->toc_lk);
+    return rc;
 }

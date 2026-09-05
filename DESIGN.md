@@ -573,7 +573,7 @@ exactly the one this library must not blur.
 Avoid as first targets: conquest (`io_module`, 128k LOC — the whole I/O hub),
 fleur (641 binding sites), QE/EPW (1553), nwchem (vendored 4.4BSD hash db).
 
-## 6a. The crayio family — the strongest deprecation case in the corpus
+## 6a. The crayio family — evidence for the thesis, not an adoption target
 
 A search of the corpus for `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` found **five copies
 of one 1980s Cray word-addressable I/O emulation, in four codes, all still in
@@ -594,33 +594,49 @@ Main Branch Dalton cc/ library.` They have since drifted: LSDalton raised
 `max_file` to 250 (someone hit the limit), and NWChem's two internal copies
 differ from each other by 75 lines.
 
-**Why this is the best target, ahead of Psi4 on technical grounds:**
+**An earlier draft of this section proposed crayio as the primary deprecation
+target. That was wrong, and the reason is worth recording**, because it is the
+difference between a duplication finding and an adoption opportunity.
 
-1. **The API is a strict subset of ours.** `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` is
-   `ls_open`/`ls_close`/`ls_read`/`ls_write` with the offset in 64-bit words
-   instead of bytes. The shim is a multiply by eight.
-2. **The contract is already ours.** The MADNESS survey: "fully generic:
-   `crayio.c` knows nothing about eigenvector layout, it is a pure word
-   get/put-by-offset store; all layout knowledge stays in the caller". The
-   LSDalton survey: "the crayio C layer is a genuinely generic keyed byte-range
-   store". These are independent confirmations that the seam is drawn in the
-   right place.
-3. **The performance criterion has headroom here, unlike Psi4.** Every copy
-   declares itself synchronous and unbuffered. Psi4 already has a working
-   asynchronous layer (`AIOHandler`), so libscratch offers it consolidation
-   rather than speed; crayio's callers have no overlap at all.
-4. **Four codes in one stroke** — the 3–5 code deprecation criterion is met by
-   this family alone.
-5. **`max_file` is a bug class we delete by construction.** A fixed static table
-   of 99 or 250 open units, with no growth path, is why the copies diverged.
+- **Dalton and LSDalton are not actively developed.** Deprecation requires a
+  maintainer who merges the removal.
+- **MADNESS is active, but its crayio use is confined to `apps/moldft/fci`**, a
+  legacy Fortran/C full-CI module that appears unchanged since 1999 — the file
+  carries CVS `$Id$` keywords and a sibling tagged `fci_davids.F,v 1.2
+  1999/07/28`. Nobody is going to accept a new dependency into it.
+- **NWChem is very much alive** — 665 commits in the two years to 2026-06 —
+  **but its crayio copies are not.** `src/moints/crayio.c` has four commits in
+  its entire history: 1995-10-17 ("Additions for semi-direct"), 1995-11-03
+  ("Linux port"), 1997-11-04 ("added cvs tags"), and a repo-wide CVS `$Id:$`
+  removal in 2010. The last substantive change was thirty-one years ago.
+  `src/mrpt/fci/crayio.c` was imported in 1997 and has had only tag housekeeping
+  since. §6 already lists NWChem under "avoid as first targets" on other grounds.
 
-**Honest caveats.** Word-versus-byte addressing must be exact, and the copies
-disagree on integer width handling (`IRAT`, `VAR_INT64`, `SYS_AIX`) — the shim
-has to be written per code, not once. These are also the oldest, least-attended
-corners of these codes, which cuts both ways: nobody will object, and nobody will
-review. Dalton demonstrates the risk directly — `src/pdpack/fastio_g07.F` is a
-complete 923-line record-I/O library that is not wired into the CMake build at
-all, dead code nobody removed.
+**The withdrawn claim.** "Four codes in one stroke, meeting the 3–5 code
+deprecation criterion" does not hold. The criterion in §1 is *deprecation*, and
+none of these four will deprecate anything. Psi4 and OpenMolcas remain the only
+primary targets.
+
+**What survives, and it is not nothing:**
+
+1. **Independent confirmation that the seam is drawn in the right place.** The
+   MADNESS survey: "fully generic: `crayio.c` knows nothing about eigenvector
+   layout, it is a pure word get/put-by-offset store; all layout knowledge stays
+   in the caller." The LSDalton survey: "the crayio C layer is a genuinely
+   generic keyed byte-range store." Two codes, arrived at independently of this
+   design, describing this design's contract.
+2. **A conformance target.** `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` is a strict subset
+   of our API — the same calls with the offset in 64-bit words rather than bytes.
+   A shim implementing crayio over libscratch, exercised against one of these
+   codes' test suites, is a cheap and genuine validation that the API is
+   sufficient for the word-addressed workload, without requiring anyone to merge
+   it. Worth doing in `tests/`; not worth counting as adoption.
+3. **The strongest single piece of evidence for the duplication thesis** in the
+   whole corpus, and the reason it belongs in the manuscript rather than here:
+   the persistence is not explained by dead projects. NWChem is thriving and its
+   copy has been untouched since 1995. This layer simply never gets revisited.
+4. **`max_file` is a bug class we delete by construction.** A fixed static table
+   of 99 or 250 open units with no growth path is why the copies diverged.
 
 **Related prior art: DIRAC's `waio`.** The DIRAC survey calls it "arguably
 *already* the shared library the design effort is looking for", and its two
@@ -629,9 +645,14 @@ on overwrite — are precisely what this library must do better. It also carries
 write-before-random-read invariant that we must decide to enforce or explicitly
 not enforce; silently returning garbage is not an option.
 
-**Revised ranking.** Psi4 and OpenMolcas remain the primary deprecation targets
-on willingness grounds (§6). The crayio family is the primary *technical* target
-and the one that carries the performance claim.
+**Consequence for the performance criterion.** Crayio was going to carry it,
+since every copy declares itself synchronous and unbuffered whereas Psi4 already
+has a working `AIOHandler`. With crayio withdrawn, **the performance claim rests
+on OpenMolcas**, whose `DaFile` asynchronous `iOpt` codes have been documented
+no-ops for the life of the codebase across all 2200 call sites (§9 of its
+survey). That is still a real and unusually clean target — the interface already
+promises asynchrony and nothing implements it — but it is now a single target
+rather than a family, and §7's validation plan should reflect that.
 
 ## 6b. The Psi4 port, measured
 
@@ -677,6 +698,12 @@ its hottest paths; the rest of its scratch traffic is as synchronous as crayio's
 So there is headroom in Psi4 -- just not in the nine files that already have it,
 which is exactly where anyone would look first and find none.
 
+This qualifies §6a's conclusion that the performance claim now rests on
+OpenMolcas alone. It rests there *first*, because OpenMolcas's asynchronous verbs
+already exist and merely do nothing (§6c). But Psi4 is not spoken for: 443 of the
+452 files that touch psio have no overlap available to them today, and reaching
+them needs no new API either, only `ls_aread` where `psio_read` now stands.
+
 Replacing `AIOHandler` is therefore two different things at once: consolidation
 in those nine files, and, if `ls_aread` were pushed past them, the performance
 case. Neither is part of this first shim: a first port should change nothing that
@@ -690,6 +717,66 @@ Psi4's test suite has **not** been run against it. §7 asks for a byte-exact
 round-trip against the existing layer and then the adopter's own tests; neither
 is done, and until they are this is a demonstration that the API fits, not a
 port.
+
+## 6c. The OpenMolcas port, and why it is not the Psi4 port
+
+`fortran/libscratch.F90` is the `ISO_C_BINDING` module §4a promises; it did not
+exist before this port needed it. `port/openmolcas/` reimplements the DaFile
+family over it. Measured against the tree at `dc523670f`:
+
+| | |
+|---|---|
+| DaFile-family call sites | 2225 in 508 files |
+| of which writes (iOpt 1) / reads (iOpt 2) / dummy writes (iOpt 0) | 717 / 912 / 164 |
+| `io_util` | 5942 lines |
+| the shim | 300 lines, plus 330 for the Fortran binding |
+
+**The address is not opaque here, and that is the whole difference from §6b.**
+Psi4 consumers never do arithmetic on a `psio_address` -- `.page` appears zero
+times outside libpsio -- so the shim could linearise it freely. OpenMolcas
+callers add byte and word counts to `iDisk` in hundreds of places, so the media
+block length is observable behaviour:
+
+- `MBl_wa = 8` for word-addressable units, `MBl_nwa = 512` for the rest;
+- a transfer that does not fill a block rounds the returned cursor **up** to the
+  next one, so 100 doubles written at cursor 0 of a 512-byte unit leaves the
+  cursor at 2, not at 1.
+
+Reproducing that exactly is most of the work, and it is why this port is
+mechanical only in the sense that a translation with a fixed dictionary is
+mechanical. The Psi4 shim could have been written without reading a caller; this
+one could not.
+
+**Two things disappear by construction.** `Multi_File`/`MaxFileSize` striping --
+`mpdafile.F90` and friends, 328 lines and 23 references -- exists because a unit
+could outgrow a file; a libscratch store has no such limit. This is the same bug
+class §6a deletes from crayio's fixed `max_file` table, arrived at independently.
+And the shared position array `Addr()` that §5a identifies as unguarded across
+some 672 call sites has no counterpart at all: `pread`/`pwrite` carry no file
+position, so the thread-safety defect is not fixed so much as made
+unrepresentable.
+
+**One thing becomes real, and it is the most interesting finding here.**
+`iOpt = 6` and `7` are documented in `dafile.F90` as asynchronous write and read.
+They are not. Both fall through to the identical `AixWr`/`AixRd` calls as options
+1 and 2 -- `if ((iOpt == 1) .or. (iOpt == 6))` -- and **no call site in the tree
+uses them**: 0 occurrences of either, against 717 and 912 for their synchronous
+twins. So OpenMolcas has carried an asynchronous contract in its public API for
+decades without an implementation behind it and without a caller in front of it.
+
+The shim implements them for real, with the contract that the caller's buffer
+must stay valid until the next DaFile operation on that unit or `DaClos`.
+Adopting overlap is then a one-character edit at whichever call sites their
+authors judge safe -- which is a much better position than §5.1 assumed, where
+callers who want double buffering must hand-roll it. Here the API already has
+the verb; only the implementation was missing.
+
+**What this is not.** 13 checks in `port/openmolcas/test_dafile_shim.F90` cover
+both block lengths, the rounding, the threaded cursor, the dummy and rewind
+options, integer transfers, and 6/7 against 1/2. `runfile_util` (6322 lines, the
+keyed Label layer) is untouched, nothing has been built inside OpenMolcas, and
+its test suite has not been run. As with §6b: the API fits, which is not the same
+as the port working.
 
 ## 7. Validation plan
 
@@ -986,6 +1073,6 @@ Still open, and the only one that matters:
 - **Does the Psi4 port survive Psi4's own test suite?** §6a fits the API to
   libpsio without changing a call site, but it has not been built inside Psi4.
   That, not the shim, is what makes criterion 1 falsifiable.
-- **OpenMolcas.** Not started. Its `io_util` is a 16-char Label to an in-memory
-  table to a word offset, so the same shape should apply, but the cursor-threaded
-  `iDisk` convention and 672 unguarded call sites make it the larger job.
+- **OpenMolcas.** The DaFile layer is done as a shim (§6c) and `runfile_util`,
+  the keyed Label layer above it, is not. Neither port has been built inside its
+  code, which is the step that turns both into evidence for criterion 1.

@@ -5,3 +5,6 @@ tests/abi_header_test
 tests/test_posix
 tests/churn_libscratch
 bench/ooc_bench
+fortran/*.mod
+port/openmolcas/test_dafile_shim
+port/psi4/test_psio_shim

@@ -1,7 +1,9 @@
 # libscratch — design sketch
 
 **Start here.** Every design question is settled; what remains is implementation
-and one measurement. Read §1 (criteria), §3 (scope), §4 + §4a (API and bindings),
+and one measurement. The ABI-level consequences of those decisions — error
+model, failure semantics, ownership, locking — are settled separately in §4b,
+which also corrects two defects in the §4 sketch. Read §1 (criteria), §3 (scope), §4 + §4a (API and bindings),
 §5a (threading). §§7a–7e record *why* each alternative was rejected — read them
 before reopening a settled question, because each was closed by a test in
 `tests/`, not by opinion, and the tests are runnable.
@@ -153,14 +155,25 @@ Opaque handles; no global unit registry; thread-safe; no init call.
 typedef struct ls_store ls_store;
 typedef struct ls_req   ls_req;      /* async request handle */
 
-/* policy chosen at open, not baked into the API */
-typedef enum { LS_LOCAL, LS_PER_RANK, LS_SHARED_MPIIO } ls_parallel;
+/* policy chosen at open, not baked into the API. Backend and mode are part of
+   it: an earlier draft discussed both in prose (§3, §7b) but left neither in the
+   struct, so there was no way to ask for either. §4b settles the rest. */
+typedef enum { LS_POSIX, LS_HDF5 }      ls_backend;
+typedef enum { LS_EXPLICIT, LS_MAPPED } ls_mode;
+typedef enum { LS_LOCAL, LS_PER_RANK }  ls_parallel;
 typedef struct {
+  uint32_t    version;         /* = LS_OPTS_VERSION; from ls_opts_default    */
+  ls_backend  backend;
+  ls_mode     mode;
   ls_parallel parallel;
+  int         rank;            /* LS_PER_RANK; <0 => environment, else pid   */
   size_t      memory_budget;   /* stay in RAM below this; 0 = always spill   */
   const char *dir;             /* NULL => TMPDIR, node-local if available    */
   int         direct_io;       /* bypass page cache for large aligned writes */
+  ls_log      log;             /* optional; called on every failure          */
+  void       *log_ctx;
 } ls_opts;
+void ls_opts_default(ls_opts *o);
 
 ls_store *ls_open (const char *name, const ls_opts *opts, int *err);
 int       ls_close(ls_store *s, int keep);          /* keep=0 => unlink */
@@ -178,7 +191,9 @@ int ls_read (ls_store *s, const char *key, uint64_t off, size_t n,       void *b
 int ls_exists(ls_store *s, const char *key, int *found);
 int ls_size  (ls_store *s, const char *key, uint64_t *nbytes);
 int ls_erase (ls_store *s, const char *key);
-int ls_keys  (ls_store *s, const char ***keys, size_t *n);   /* library-owned */
+int ls_reserve(ls_store *s, const char *key, uint64_t nbytes);  /* preallocate */
+int  ls_keys(ls_store *s, char ***keys, size_t *n);      /* snapshot, caller-owned */
+void ls_keys_free(char **keys, size_t n);
 
 /* ACCUMULATE: read-modify-write, buf combined into what is stored.
    Taken from NWChem's TCE, whose `add_block` sits alongside get_block/put_block
@@ -275,6 +290,82 @@ expressed in one line.
 The C entry points remain public and supported — Fortran needs them and ABI
 stability is the point — but no C++ or Python consumer should have to touch
 them.
+
+## 4b. The ABI contract
+
+§4 sketches the calls; this settles the parts a second implementer would
+otherwise have to guess, and which cannot be changed later without breaking
+every consumer. `include/libscratch.h` is the normative form. Six questions were
+open, and two of them were defects rather than omissions.
+
+**Errors are negated errno, with our own codes below -1000.** No global error
+variable and no per-store last-error slot: the return value is the whole report,
+which is what lets every entry point be called concurrently without the caller
+reasoning about shared error state. Passing the OS code through unchanged
+matters most for `-ENOSPC`, which on a scratch filesystem is a routine event and
+not a bug — a caller may reasonably respond by shrinking its block size rather
+than aborting the run. `ls_strerror` takes a caller buffer instead of returning
+a static string, so that it stays thread-safe across the errno range too.
+
+**`ENOSPC` and partial transfers.** Short transfers from the OS are retried
+internally, so the data calls are all-or-nothing to the caller. On failure the
+affected range holds undefined bytes; nothing is rolled back. `ls_reserve`
+exists so that a full filesystem is discovered where the caller can still act on
+it rather than an hour into a contraction, and it doubles as the preallocation
+that §5.4 counts on. The context a diagnostic needs — key, offset, length —
+reaches the caller through the optional `ls_log` callback rather than a stateful
+error API.
+
+**`LS_SHARED_MPIIO` is removed.** It had no communicator anywhere in `ls_opts`,
+and adding one would put MPI in the dependency set of a library whose default
+backend has none. §5a already settles cross-process sharing as out of scope.
+`LS_PER_RANK` takes an explicit rank; if the caller passes a negative one the
+library reads `OMPI_COMM_WORLD_RANK`, `PMI_RANK`, `PMIX_RANK` or `SLURM_PROCID`
+and otherwise falls back to the pid, which is what keeps two ranks on a node
+from colliding when the launcher sets nothing. It never links MPI to find out.
+
+**`ls_keys` returns a caller-owned snapshot**, released with `ls_keys_free`,
+rather than a library-owned view. A view would have had to specify how long it
+stays valid, and under the concurrency §5a promises the honest answer is "until
+any other thread writes a new key" — which is not a usable contract. Copying a
+few hundred short strings costs nothing against the I/O this library exists for.
+
+**The table of contents is locked, even though the data path is not.** This
+corrects §5a rather than extending it: "concurrent operations on distinct keys
+are safe" cannot hold without it, because a first write to a key creates that
+key, and creation mutates a structure every other thread reads. The lock is
+never held across an I/O operation, so it does not serialise the async layer —
+the objection §5a raises against NWChem's global lock does not apply to a lock
+that is only ever held for a table update. No data-range lock is added.
+
+**Undefined mode combinations now fail rather than being undefined.**
+`LS_MAPPED` requires `LS_POSIX` and `memory_budget == 0` — a mapped store's
+cache is the kernel's page cache, and a second budget on top of it means
+nothing — with `LS_ERR_INVAL` at `ls_open` for either violation. On a mapped
+store `ls_accumulate` and the asynchronous calls return `LS_ERR_MODE`, for the
+reason §3 already gives: you cannot prefetch a page fault, and `p[i] += x` is
+the caller's own accumulate. `ls_read` and `ls_write` do remain available on a
+mapped store, defined as a copy through the mapping; that is not a mode
+conversion but a porting aid, and it costs one `memcpy` to provide.
+
+**Two conventions that are ABI whether or not anyone writes them down.**
+`ls_opts` carries a `version` as its first member so that later options can be
+appended without breaking a caller compiled against an older header; obtain one
+from `ls_opts_default`, never by declaring and filling. Keys are opaque byte
+strings up to `LS_KEY_MAX` = 255, with no character restrictions, which is a
+consequence of the POSIX backend being **one file per store** — a heap with its
+own table of contents and extent free list, not a directory of files per key.
+That is the same choice that makes the free-list reuse of §7b ours to control,
+and it sidesteps HDF5's many-small-datasets risk rather than reproducing it.
+
+**Deferred, with their shapes fixed so that adding them stays compatible:**
+`ls_map`/`ls_unmap`, `ls_accumulate`, `ls_prefetch`, and a *symmetric*
+`ls_read_strided`/`ls_write_strided` pair — the sketch had only the write half.
+There is no asynchronous strided form; nothing in the corpus asks for both at
+once. `LS_HDF5` and `LS_MAPPED` are declared in the enums but rejected at
+`ls_open` with `LS_ERR_BACKEND` and `LS_ERR_MODE` until they exist, so a caller
+can compile against the whole option space and discover at run time what a given
+build actually supports.
 
 ## 5a. Threading and concurrency: isolation, not locking
 
@@ -582,3 +673,14 @@ decided per store at open time rather than designed in.
   mapped stores, by nature rather than by omission.
   Cursor-threaded addressing (OpenMolcas's in/out `iDisk`) was never a problem:
   the cursor is an offset the caller already holds.
+- ~~Error model, `ENOSPC` and partial transfers, `ls_keys` ownership, table-of-
+  contents locking, the missing communicator on `LS_SHARED_MPIIO`, and the
+  undefined `LS_MAPPED` combinations~~ **settled in §4b**, and expressed in
+  `include/libscratch.h`. Two of the six were defects in §4, not omissions: the
+  struct had no backend or mode member at all, and §5a's distinct-key guarantee
+  was unimplementable without a lock on the table of contents.
+
+Still open, and the only one that matters:
+
+- **Does asynchronous overlap win on a real out-of-core workload?** Criterion 2
+  (§1), answerable only by measurement, and cheapest via the abacus port (§6).

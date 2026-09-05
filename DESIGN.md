@@ -150,6 +150,115 @@ the memory tier, space management under churn — lives entirely on the explicit
 path. What must be resisted is letting the two modes acquire separate feature
 sets beyond this one difference.
 
+## 3a. What the surveys asked for that the API does not yet provide
+
+Section 7 of each scratch-I/O survey asked, of every code: *could these call
+sites be rewritten mechanically against a keyed byte-range store, or is there
+something in this code's usage that such an interface cannot express?* Grouping
+the answers by how many codes raised the same thing turns the wish-list into a
+ranking. Five requests recur; three are cheap and one is a genuine design fork.
+
+### (1) Concurrent disjoint-range access to one shared key — 7 codes. THE fork.
+
+The largest single gap, and the only one that touches §5a.
+
+- **BigDFT** — "a generic `open/write(key, range)` API would need every rank to
+  be able to write disjoint ranges of the *same* key concurrently and have that
+  be well-defined and race-free; a plain per-key single-writer store does not"
+- **DFT-FE** — "`MPIWriteOnFile` is genuinely collective (`MPI_File_write_all`);
+  a shared library would need a real collective `write` variant"
+- **MOLGW** — "byte-range addressing *within* a single key that ranks can compute
+  offsets into collectively... a plain per-key blob API would force an awkward
+  gather-then-write-from-rank-0 pattern"
+- **Octopus** — "collective per-rank byte-range read into a single shared object"
+- **QE/EPW** — "genuinely collective, offset-addressed parallel I/O — a keyed
+  store would need a true collective-write primitive, not merely an async variant"
+- **yambo** — "let every rank open the same key concurrently with disjoint offset
+  ranges and well-defined visibility ordering"
+- **SIESTA** — "expose a collective/broadcast-read primitive"
+
+**Recommendation: support it as a mode, not as an MPI dependency.** An
+`LS_SHARED` store, POSIX backend first, with the contract stated negatively:
+*ranges must be disjoint; there is no implied ordering between ranks; visibility
+after a write is guaranteed only after the caller's own synchronisation.* That is
+exactly what `pwrite` already gives and what every one of these codes already
+assumes from MPI-IO. It costs us no MPI linkage — the barrier stays in the
+caller, where it belongs, and where MADNESS, SIESTA and Conquest all independently
+said their fan-out logic has to stay anyway.
+
+This does not contradict §5a. That section settles *intra*-process concurrency
+(isolation, not locking, positional I/O as the primitive); this is inter-process,
+and positional I/O is the primitive there too.
+
+### (2) An append call that returns the offset it wrote at — 3 codes, one huge.
+
+**OpenMolcas is the reason this matters.** Its survey: "`iDisk` is an *opaque
+running cursor*: the caller does not supply an independently-computed offset — it
+obtains one from a prior call's output and the callee auto-advances." That idiom
+sits under all 2200 `dDaFile`/`iDaFile` call sites. Without a matching primitive,
+the port is a rewrite; with one, it is mechanical.
+
+```c
+int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
+              uint64_t *off_out);   /* writes at the key's current end */
+```
+
+Also serves APE ("a byte-range store has no record framing") and ABINIT's
+row-by-row growth. Cheap, and it converts the single largest call-site count in
+the corpus from hostile to trivial.
+
+### (3) A small opaque attribute blob per key — 5 codes.
+
+ERKALE ("serialize/deserialize shape+dtype alongside the bytes"), VeloxChem ("a
+serialization/schema layer bolted on top"), ChronusQ (`getDims`/`getTypeClass`
+introspection for restart-validity checks, ~10 sites), yambo ("this metadata
+layer built on top, as a convention"), MRChem ("a fixed struct plus a
+variable-length adaptive blob... two keys or one length-prefixed value").
+
+**This is not self-description and must not become it.** The concession is a
+bounded, opaque side-blob the store never interprets:
+
+```c
+int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n);
+int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
+```
+
+Cap it (256 bytes), define no schema, and the payload stays opaque — §3's
+refusal to know what a tensor is survives intact. Five codes stop needing a
+shim; TREXIO's and HDF5's territory is not entered.
+
+### (4) Scatter/gather — 3 codes.
+
+Serenity needs "in-place strided partial update without either read-modify-write
+(defeats the purpose — these are large vectors) or the caller buffering the whole
+vector". CPMD needs in-place same-size overwrite (already covered by
+`ls_write` at an offset). Conquest performs "thousands of individual scalar
+operations per file instead of one bulk record". An iovec pair — `ls_writev` /
+`ls_readv` over `pwritev`/`preadv` — covers all three for almost nothing.
+
+### (5) Tuple keys — 3 codes. Already answered; say so.
+
+LSDalton wants "(idx3,idx4) tuple as the key directly — eliminating the address
+table"; PySCF and Psi4's DPD want N-D-to-flat translation. String keys already
+grant the first. The second is layout knowledge and stays refused: PySCF's own
+survey concedes it is "doable, but it moves real logic out of the library and
+into every call site", and moving layout logic *into* the library is the failure
+mode §3 exists to prevent.
+
+### What the surveys asked for that we should refuse, and why
+
+Recording these sharpens the boundary as much as the additions do.
+
+| code | asks for | refuse because |
+|---|---|---|
+| FLEUR | its default path "is not file I/O at all" — a distributed in-memory KV over one-sided `MPI_GET`/`MPI_PUT` with shared/exclusive locking | we would have to *be* an MPI RMA abstraction |
+| qp2 | Cholesky and Davidson `W`/`S` matrices — "the survey's one clear negative result" | these are BLAS3 operands, not records |
+| jdftx | N-dimensional hyperslabs into the BerkeleyGW on-disk format | a named external format is HDF5's job |
+| MADNESS, SIESTA, Conquest | MPI fan-in/fan-out around the store | "only MADNESS's runtime knows" — stays in the caller |
+| DFTB+ | the NEGF cache | it lives inside libNEGF; not DFTB+'s to route |
+| GPAW | `.npy` `mmap_mode='c'` compatibility | external consumer scripts depend on the format |
+| Conquest | the EXX ERI cache | "the design intent is the opposite of a store: it exists specifically to avoid I/O" |
+
 ## 4. API sketch (C core)
 
 Opaque handles; no global unit registry; thread-safe; no init call.
@@ -464,6 +573,124 @@ exactly the one this library must not blur.
 Avoid as first targets: conquest (`io_module`, 128k LOC — the whole I/O hub),
 fleur (641 binding sites), QE/EPW (1553), nwchem (vendored 4.4BSD hash db).
 
+## 6a. The crayio family — the strongest deprecation case in the corpus
+
+A search of the corpus for `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` found **five copies
+of one 1980s Cray word-addressable I/O emulation, in four codes, all still in
+the tree**:
+
+| code     | path                              | lines | `max_file` |
+|----------|-----------------------------------|-------|------------|
+| Dalton   | `DALTON/cc/crayio.c`              | 421   | 99  |
+| LSDalton | `src/lsutil/crayio.c`             | 496   | 250 |
+| MADNESS  | `src/apps/moldft/fci/crayio.c`    | 337   | 99  |
+| NWChem   | `src/mrpt/fci/crayio.c`           | 352   | 99  |
+| NWChem   | `src/moints/crayio.c`             | 361   | 99  |
+
+All five carry the same misspelling — *"the I/O is **syncronous** and
+unbuffered"* — which fingerprints a single common ancestor. LSDalton's header
+states the provenance outright: `Kasper K: Borrowed C-filehandling program from
+Main Branch Dalton cc/ library.` They have since drifted: LSDalton raised
+`max_file` to 250 (someone hit the limit), and NWChem's two internal copies
+differ from each other by 75 lines.
+
+**Why this is the best target, ahead of Psi4 on technical grounds:**
+
+1. **The API is a strict subset of ours.** `WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` is
+   `ls_open`/`ls_close`/`ls_read`/`ls_write` with the offset in 64-bit words
+   instead of bytes. The shim is a multiply by eight.
+2. **The contract is already ours.** The MADNESS survey: "fully generic:
+   `crayio.c` knows nothing about eigenvector layout, it is a pure word
+   get/put-by-offset store; all layout knowledge stays in the caller". The
+   LSDalton survey: "the crayio C layer is a genuinely generic keyed byte-range
+   store". These are independent confirmations that the seam is drawn in the
+   right place.
+3. **The performance criterion has headroom here, unlike Psi4.** Every copy
+   declares itself synchronous and unbuffered. Psi4 already has a working
+   asynchronous layer (`AIOHandler`), so libscratch offers it consolidation
+   rather than speed; crayio's callers have no overlap at all.
+4. **Four codes in one stroke** — the 3–5 code deprecation criterion is met by
+   this family alone.
+5. **`max_file` is a bug class we delete by construction.** A fixed static table
+   of 99 or 250 open units, with no growth path, is why the copies diverged.
+
+**Honest caveats.** Word-versus-byte addressing must be exact, and the copies
+disagree on integer width handling (`IRAT`, `VAR_INT64`, `SYS_AIX`) — the shim
+has to be written per code, not once. These are also the oldest, least-attended
+corners of these codes, which cuts both ways: nobody will object, and nobody will
+review. Dalton demonstrates the risk directly — `src/pdpack/fastio_g07.F` is a
+complete 923-line record-I/O library that is not wired into the CMake build at
+all, dead code nobody removed.
+
+**Related prior art: DIRAC's `waio`.** The DIRAC survey calls it "arguably
+*already* the shared library the design effort is looking for", and its two
+stated defects — linear-scan-on-read (`dirac_labsearch`) and no space reclamation
+on overwrite — are precisely what this library must do better. It also carries a
+write-before-random-read invariant that we must decide to enforce or explicitly
+not enforce; silently returning garbage is not an option.
+
+**Revised ranking.** Psi4 and OpenMolcas remain the primary deprecation targets
+on willingness grounds (§6). The crayio family is the primary *technical* target
+and the one that carries the performance claim.
+
+## 6b. The Psi4 port, measured
+
+`port/psi4/` reimplements libpsio's entry points on libscratch. Psi4's `psio.h`
+and `psio.hpp` are unchanged, so **no consumer call site changes at all** --
+which is the §7 criterion stated as a number rather than a hope. Measured
+against the Psi4 tree at `a0e6ba5c4`:
+
+| | |
+|---|---|
+| files outside libpsio that touch psio | 452 |
+| psio call sites in them | ~1080 |
+| **call sites the port changes** | **0** |
+| libpsio files the shim replaces | 23, **2036 lines** |
+| the shim | **344 lines** |
+| libpsio files that stay | 9, 850 lines (PSIOManager, paths, namespaces, error text) |
+
+Three properties make it mechanical, and each was checked against the tree
+rather than assumed:
+
+1. **`psio_address` is linear.** `psio_get_address(start, shift)` is exactly
+   `start + shift` in (page, offset) coordinates, so `page * PSIO_PAGELEN +
+   offset` is a faithful byte offset. §8 recorded this from an earlier reading;
+   it still holds, and `.page` appears **zero** times outside libpsio.
+2. **`psio_tocscan` is an existence test.** `->sadd` and `->eadd` appear zero
+   times outside libpsio, and every consumer writes `if (!psio_tocscan(...))` or
+   compares against `nullptr`. The one exception is `export_psio.cc`, which
+   hands the pointer to Python.
+3. **The on-disk table of contents is nobody's business.** `rd_toclen`,
+   `tocread` and `toclen` have no consumers outside libpsio and `tocwrite` has
+   one, so libscratch owning the table costs Psi4 nothing.
+
+**`zero_disk` is the clearest single gain.** Psi4 writes `rows * cols` zeroed
+doubles one row at a time -- `rows` separate calls through the whole stack. The
+shim is one `ls_reserve`, which on Linux is one `fallocate`. 59 call sites.
+
+**Second stage: `aio_handler.cc`, and a refinement to §6a.** §6a is right that
+Psi4 has a working asynchronous layer and so is offered consolidation rather
+than speed -- but the layer is narrower than that suggests. `AIOHandler` is 482
+lines with **27 call sites in nine files** (DiskDFJK, the PK Fock builders,
+SAPT), against **452 files** that touch psio. Psi4's overlap covers a handful of
+its hottest paths; the rest of its scratch traffic is as synchronous as crayio's.
+So there is headroom in Psi4 -- just not in the nine files that already have it,
+which is exactly where anyone would look first and find none.
+
+Replacing `AIOHandler` is therefore two different things at once: consolidation
+in those nine files, and, if `ls_aread` were pushed past them, the performance
+case. Neither is part of this first shim: a first port should change nothing that
+could alter results.
+
+**What this is not.** The shim is exercised by `port/psi4/test_psio_shim.cc` --
+14 checks against Psi4's own usage patterns, including the streamed
+`psio_address` loop across twenty `PSIO_PAGELEN` boundaries that is the one
+place a wrong linearisation would show. It has **not** been built inside Psi4 and
+Psi4's test suite has **not** been run against it. §7 asks for a byte-exact
+round-trip against the existing layer and then the adopter's own tests; neither
+is done, and until they are this is a demonstration that the API fits, not a
+port.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,
@@ -756,3 +983,9 @@ Still open, and the only one that matters:
   come from one loaded workstation. The question stays open until it is answered
   on a quiet node, on both a shared filesystem and node-local NVMe, inside a
   real Psi4 or OpenMolcas workload rather than a benchmark kernel.
+- **Does the Psi4 port survive Psi4's own test suite?** §6a fits the API to
+  libpsio without changing a call site, but it has not been built inside Psi4.
+  That, not the shim, is what makes criterion 1 falsifiable.
+- **OpenMolcas.** Not started. Its `io_util` is a 16-char Label to an in-memory
+  table to a word offset, so the same shape should apply, but the cursor-threaded
+  `iDisk` convention and 672 unguarded call sites make it the larger job.

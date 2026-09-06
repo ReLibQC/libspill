@@ -5,6 +5,7 @@
  * port, not so a job can resume from one. */
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,16 +38,41 @@ static uint32_t crc32_of(const unsigned char *p, size_t n)
 
 /* ------------------------------------------------------------------ options */
 
-void ls_opts_default(ls_opts *o)
+/* How many bytes of ls_opts each version defines. This is the whole mechanism
+ * behind §4b's promise that the struct can grow: a caller compiled against an
+ * older header passes a SMALLER struct, so the library must neither read nor
+ * write past what that version declared. Until exact_name there was only one
+ * version and the promise was never exercised -- ls_open tested
+ * `version != LS_OPTS_VERSION`, which would have rejected exactly the older
+ * callers the field exists to support. */
+static size_t opts_size(uint32_t version)
 {
+    switch (version) {
+        case 1u: return offsetof(ls_opts, exact_name);
+        case 2u: return sizeof(ls_opts);
+        default: return 0;
+    }
+}
+
+void ls_opts_init(ls_opts *o, uint32_t version)
+{
+    size_t n;
     if (!o) return;
-    memset(o, 0, sizeof *o);
-    o->version  = LS_OPTS_VERSION;
+    if (version == 0u || version > LS_OPTS_VERSION) version = LS_OPTS_VERSION;
+    n = opts_size(version);
+
+    memset(o, 0, n);
+    o->version  = version;
     o->backend  = LS_POSIX;
     o->mode     = LS_EXPLICIT;
     o->parallel = LS_LOCAL;
     o->rank     = -1;
+    /* Fields added after `version` stay zero, which is their default. */
 }
+
+/* The pre-macro entry point, kept for binaries that already call it. */
+#undef ls_opts_default
+void ls_opts_default(ls_opts *o) { ls_opts_init(o, LS_OPTS_VERSION); }
 
 static int resolve_rank(int rank)
 {
@@ -77,13 +103,36 @@ static char *build_path(const char *name, const ls_opts *o)
     p = malloc(n);
     if (!p) return NULL;
 
+    if (o->exact_name)
+        snprintf(p, n, "%s/%s", dir, name);
     /* LS_SHARED deliberately does NOT fold in the rank: every process must
      * name the same file. */
-    if (o->parallel == LS_PER_RANK)
+    else if (o->parallel == LS_PER_RANK)
         snprintf(p, n, "%s/%s.r%d.libspill", dir, name, resolve_rank(o->rank));
     else
         snprintf(p, n, "%s/%s.libspill", dir, name);
     return p;
+}
+
+int ls_store_exists(const char *name, const ls_opts *opts, int *found)
+{
+    ls_opts o;
+    char *path;
+    struct stat st;
+
+    if (!name || !*name || !found) return LS_ERR_INVAL;
+    ls_opts_init(&o, LS_OPTS_VERSION);
+    if (opts) {
+        size_t n = opts_size(opts->version);
+        if (n == 0) return LS_ERR_INVAL;
+        memcpy(&o, opts, n);
+        o.version = LS_OPTS_VERSION;
+    }
+    path = build_path(name, &o);
+    if (!path) return -ENOMEM;
+    *found = (stat(path, &st) == 0 && st.st_size > 0);
+    free(path);
+    return LS_OK;
 }
 
 /* ------------------------------------------------- table of contents on disk */
@@ -221,11 +270,19 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
     struct stat st;
     int rc = LS_OK;
 
-    if (opts) o = *opts; else ls_opts_default(&o);
     if (err) *err = LS_OK;
-
     if (!name || !*name) { if (err) *err = LS_ERR_INVAL; return NULL; }
-    if (o.version != LS_OPTS_VERSION) { if (err) *err = LS_ERR_INVAL; return NULL; }
+
+    /* Accept any version this library knows, not only the newest: a caller
+     * compiled against an older header passes a shorter struct, and copying
+     * only what that version declared is what makes the struct extensible. */
+    ls_opts_init(&o, LS_OPTS_VERSION);
+    if (opts) {
+        size_t n = opts_size(opts->version);
+        if (n == 0) { if (err) *err = LS_ERR_INVAL; return NULL; }
+        memcpy(&o, opts, n);
+        o.version = LS_OPTS_VERSION;
+    }
 
     /* §4b: the combinations that are wrong in principle are refused before the
      * ones that are merely not built yet, so that behaviour does not change
@@ -260,6 +317,13 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
         return NULL;
     }
 #endif
+
+    /* LS_PER_RANK folds a rank into the path; exact_name takes the name
+     * verbatim. Asking for both is asking for two different names. */
+    if (o.exact_name && o.parallel == LS_PER_RANK) {
+        if (err) *err = LS_ERR_INVAL;
+        return NULL;
+    }
 
     s = calloc(1, sizeof *s);
     if (!s) { if (err) *err = -ENOMEM; return NULL; }

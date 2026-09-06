@@ -116,6 +116,24 @@ program test_fortran
   call check(b(1) == -1.0d0, 'a write through the mapping reached the store')
   rc = ls_close_f(s, 0_c_int)
 
+  ! exact_name, which also checks that ls_opts_t still mirrors the C struct:
+  ! the field is last, so a layout drift shows up here and nowhere else.
+  o = ls_defaults()
+  o%exact_name = 1_c_int
+  rc = ls_store_exists_f('RUNFILE_F', o, found)
+  call check(rc == LS_OK .and. .not. found, 'ls_store_exists_f on an absent store')
+  s = ls_open_f('RUNFILE_F', o, err)
+  call check(err == LS_OK, 'an exact-named store opens')
+  rc = ls_write_f(s, 'k', 0_c_int64_t, int(8*16, c_size_t), c_loc(a))
+  rc = ls_close_f(s, 1_c_int)
+  rc = ls_store_exists_f('RUNFILE_F', o, found)
+  call check(rc == LS_OK .and. found, '  ... and ls_store_exists_f then finds it')
+  s = ls_open_f('RUNFILE_F', o, err)
+  b = 0.0d0
+  rc = ls_read_f(s, 'k', 0_c_int64_t, int(8*16, c_size_t), c_loc(b))
+  call check(rc == LS_OK .and. all(b(1:16) == a(1:16)), '  ... and it round-trips')
+  rc = ls_close_f(s, 0_c_int)
+
   write(6,'(i0,a,i0,a)') ntest, ' checks, ', nfail, ' failed'
   if (nfail /= 0) error stop 1
 

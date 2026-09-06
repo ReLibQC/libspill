@@ -32,7 +32,7 @@ __all__ = [
     "Store", "open", "Error", "LS_OK", "LS_ERR_NOKEY", "LS_ERR_RANGE",
     "LS_ERR_INVAL", "LS_ERR_MODE", "LS_ERR_BACKEND", "LS_ERR_BUSY",
     "LS_ERR_CORRUPT", "POSIX", "HDF5", "EXPLICIT", "MAPPED", "LOCAL",
-    "PER_RANK", "SHARED", "ATTR_MAX", "KEY_MAX",
+    "PER_RANK", "SHARED", "ATTR_MAX", "KEY_MAX", "store_exists",
 ]
 
 LS_OK, LS_ERR_NOKEY, LS_ERR_RANGE, LS_ERR_INVAL = 0, -1000, -1001, -1002
@@ -43,7 +43,7 @@ EXPLICIT, MAPPED = 0, 1
 LOCAL, PER_RANK, SHARED = 0, 1, 2
 
 KEY_MAX, ATTR_MAX = 255, 256
-_OPTS_VERSION = 1
+_OPTS_VERSION = 2
 
 
 def _load():
@@ -81,6 +81,7 @@ class _Opts(ctypes.Structure):
         ("direct_io", ctypes.c_int),
         ("log", ctypes.c_void_p),
         ("log_ctx", ctypes.c_void_p),
+        ("exact_name", ctypes.c_int),      # LS_OPTS_VERSION 2
     ]
 
 
@@ -88,6 +89,7 @@ _P = ctypes.POINTER
 _lib.ls_opts_default.argtypes = [_P(_Opts)]
 _lib.ls_open.restype = ctypes.c_void_p
 _lib.ls_open.argtypes = [ctypes.c_char_p, _P(_Opts), _P(ctypes.c_int)]
+_lib.ls_store_exists.argtypes = [ctypes.c_char_p, _P(_Opts), _P(ctypes.c_int)]
 _lib.ls_close.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _lib.ls_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
                           ctypes.c_size_t, ctypes.c_void_p]
@@ -195,7 +197,7 @@ class Store:
 
     def __init__(self, name, *, memory_budget=0, dir=None, direct_io=False,
                  backend=POSIX, mode=EXPLICIT, parallel=LOCAL, rank=-1,
-                 keep=False):
+                 keep=False, exact_name=False):
         o = _Opts()
         _lib.ls_opts_default(ctypes.byref(o))
         o.backend = backend
@@ -205,6 +207,7 @@ class Store:
         o.memory_budget = memory_budget
         o.dir = dir.encode() if dir else None
         o.direct_io = 1 if direct_io else 0
+        o.exact_name = 1 if exact_name else 0
         err = ctypes.c_int(0)
         self._s = _lib.ls_open(name.encode(), ctypes.byref(o), ctypes.byref(err))
         if not self._s:
@@ -402,6 +405,20 @@ class Store:
 def open(name, **kw) -> Store:        # noqa: A001  -- §4a spells it libspill.open
     """libspill.open("scratch", memory_budget=8<<30) -> Store"""
     return Store(name, **kw)
+
+
+def store_exists(name, *, dir=None, exact_name=False, parallel=LOCAL, rank=-1) -> bool:
+    """Is there already a store of this name? Does not create one."""
+    o = _Opts()
+    _lib.ls_opts_default(ctypes.byref(o))
+    o.dir = dir.encode() if dir else None
+    o.exact_name = 1 if exact_name else 0
+    o.parallel = parallel
+    o.rank = rank
+    f = ctypes.c_int(0)
+    _check(_lib.ls_store_exists(name.encode(), ctypes.byref(o), ctypes.byref(f)),
+           "ls_store_exists")
+    return bool(f.value)
 
 
 def version() -> str:

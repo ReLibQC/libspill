@@ -129,7 +129,7 @@ typedef enum {
 
 #define LS_KEY_MAX    255u   /* bytes in a key, excluding the NUL           */
 #define LS_ATTR_MAX   256u   /* bytes in a key's attribute blob             */
-#define LS_OPTS_VERSION 1u
+#define LS_OPTS_VERSION 2u   /* 2 added exact_name */
 
 /* Called on every failure, before the code is returned, with whatever context
  * the failing operation had. This is how a caller gets "-ENOSPC while writing
@@ -151,7 +151,26 @@ typedef struct {
     int         direct_io;      /* bypass the page cache for aligned bulk I/O */
     ls_log      log;
     void       *log_ctx;
+    /* --- added in LS_OPTS_VERSION 2 --- */
+    int         exact_name;     /* use <dir>/<name> verbatim; see below       */
 } ls_opts;
+/* exact_name: by default a store is written to <dir>/<name>.libspill, and the
+ * suffix is not decoration -- it is how ls_open tells one of our stores from an
+ * unrelated file, returning LS_ERR_CORRUPT rather than misreading it. Set
+ * exact_name when the CALLING CODE inspects the filesystem itself and needs the
+ * file to carry the name it asked for: OpenMolcas tests for its RunFile with
+ * f_inquire on a bare 8-character name, and Psi4's PSIOManager builds and
+ * unlinks psi.<pid>.<namespace>.<filenum> paths in psiclean().
+ *
+ * The cost is that protection: with an exact name, a pre-existing unrelated
+ * file is far likelier to collide, and the namespace becomes the caller's to
+ * manage. Where a code needs only to know whether a store EXISTS, prefer
+ * ls_store_exists below -- it answers the question without handing the layout
+ * back.
+ *
+ * Refused with LS_ERR_INVAL together with LS_PER_RANK: that mode exists to fold
+ * a rank into the path, which is the opposite of taking the name verbatim. If
+ * you want both, put the rank in the name yourself. */
 /* rank: if >= 0 it is used as given. If < 0 the library takes the first of
  * OMPI_COMM_WORLD_RANK, PMI_RANK, PMIX_RANK, SLURM_PROCID present in the
  * environment, and failing all of those uses getpid(). It never links or calls
@@ -163,7 +182,22 @@ typedef struct {
  * header keeps working against a newer library. Always obtain an ls_opts from
  * ls_opts_default rather than declaring one and filling it in. */
 
+LS_API /* Fills o with defaults. Call it through the ls_opts_default macro below, which
+ * passes the version YOUR header declares -- the library then writes only the
+ * fields that version defines, so linking a newer libspill against a struct
+ * compiled from an older header cannot write past its end. */
+LS_API void ls_opts_init(ls_opts *o, uint32_t version);
+
+/* Retained so binaries compiled before ls_opts_init exists keep working; new
+ * code gets the macro. */
 LS_API void ls_opts_default(ls_opts *o);
+#define ls_opts_default(o) ls_opts_init((o), LS_OPTS_VERSION)
+
+/* Does a store of this name already exist, without creating one? Answers the
+ * question a caller would otherwise answer by looking at the filesystem, which
+ * is what exact_name exists to permit. Uses only `dir`, `parallel`, `rank` and
+ * `exact_name` from opts; the rest are ignored. */
+LS_API int ls_store_exists(const char *name, const ls_opts *opts, int *found);
 
 /* --------------------------------------------------------------- lifecycle */
 typedef struct ls_store ls_store;

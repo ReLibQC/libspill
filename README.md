@@ -64,6 +64,12 @@ target_link_libraries(mycode PRIVATE libspill::spill)     # C / C++
 target_link_libraries(mycode PRIVATE libspill::spill_f)   # Fortran module
 ```
 
+If your code inspects the filesystem libspill writes to — testing for its own
+scratch files by name, or unlinking them itself — set `exact_name` and the store
+lands at `<dir>/<name>` with no suffix. If you only need to know whether a store
+exists, prefer `ls_store_exists()`, which answers that without giving up the
+layout.
+
 A `libspill.pc` is installed for pkg-config consumers. `tests/consumer/` is a
 project that does exactly the above and is exercised by `make check-install`.
 

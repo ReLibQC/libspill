@@ -22,7 +22,7 @@ module libspill
   public :: ls_exists_f, ls_size_f, ls_erase_f
   public :: ls_awrite_f, ls_aread_f, ls_wait_f, ls_test_f
   public :: ls_append_f, ls_set_attr_f, ls_get_attr_f
-  public :: ls_map_f, ls_unmap_f
+  public :: ls_map_f, ls_unmap_f, ls_store_exists_f
   public :: ls_strerror_f
   public :: LS_OK, LS_ERR_NOKEY, LS_ERR_RANGE, LS_ERR_INVAL, LS_ERR_MODE
   public :: LS_ERR_BACKEND, LS_ERR_BUSY, LS_ERR_CORRUPT
@@ -55,6 +55,8 @@ module libspill
     integer(c_int)     :: direct_io
     type(c_funptr)     :: log
     type(c_ptr)        :: log_ctx
+    ! added in LS_OPTS_VERSION 2
+    integer(c_int)     :: exact_name
   end type ls_opts_t
 
   interface
@@ -205,6 +207,14 @@ module libspill
       import :: c_ptr, c_char, c_int
       type(c_ptr), value :: s
       character(kind=c_char), intent(in) :: key(*)
+      integer(c_int) :: rc
+    end function
+
+    function c_store_exists(name, o, found) bind(c, name='ls_store_exists') result(rc)
+      import :: c_char, c_int, ls_opts_t
+      character(kind=c_char), intent(in) :: name(*)
+      type(ls_opts_t), intent(in) :: o
+      integer(c_int), intent(out) :: found
       integer(c_int) :: rc
     end function
 
@@ -390,6 +400,18 @@ contains
     integer(c_int) :: rc
     rc = c_unmap(s, cstr(key))
   end function ls_unmap_f
+
+  ! Answers "is there already a store of this name" without creating one --
+  ! what a code would otherwise ask the filesystem, which is the reason
+  ! exact_name exists.
+  function ls_store_exists_f(name, o, found) result(rc)
+    character(len=*), intent(in) :: name
+    type(ls_opts_t), intent(in) :: o
+    logical, intent(out) :: found
+    integer(c_int) :: rc, f
+    rc = c_store_exists(cstr(name), o, f)
+    found = (f /= 0)
+  end function ls_store_exists_f
 
   function ls_strerror_f(err) result(text)
     integer(c_int), intent(in) :: err

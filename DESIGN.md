@@ -633,6 +633,58 @@ once. `LS_HDF5` and `LS_MAPPED` are declared in the enums but rejected at
 can compile against the whole option space and discover at run time what a given
 build actually supports.
 
+## 4e. `exact_name`, and the extensibility promise it tested
+
+Adding one option turned out to test two things.
+
+**The option.** By default a store lives at `<dir>/<name>.libspill`, and §4b is
+explicit that "the library owns the file layout underneath it". Two adopters
+broke on that, for the same reason: **their own code inspects the filesystem
+libspill writes to.** OpenMolcas tests for its RunFile with `f_inquire` on a
+bare 8-character name (`gxwrrun.F90:58` and four siblings), so with the suffix
+appended the check answers "no" forever and every write recreates the file.
+Psi4's `PSIOManager` builds `psi.<pid>.<namespace>.<filenum>` paths and unlinks
+them in `psiclean()`.
+
+`exact_name` writes `<dir>/<name>` verbatim. A flag rather than a naming
+convention: a rule encoded in the `name` string is the sort of implicit contract
+§4b exists to remove.
+
+**It is a concession, and the cost should be stated where the option is.** The
+suffix is not decoration — it is how `ls_open` tells one of our stores from an
+unrelated file and returns `LS_ERR_CORRUPT` instead of misreading it. With an
+exact name that protection weakens and the namespace becomes the caller's.
+Refused together with `LS_PER_RANK`, which exists to fold a rank into the path:
+asking for both is asking for two different names.
+
+**So `ls_store_exists` comes with it.** Where a code needs only to know whether
+a store is there — which is all five of OpenMolcas's RunFile sites need — it can
+ask libspill instead of the filesystem, and the layout stays ours. `exact_name`
+is for callers that need the *filename*; `ls_store_exists` is for callers that
+only thought they did.
+
+**The promise this tested, and failed.** §4b says `ls_opts` carries a `version`
+"so that later options can be appended without breaking a caller compiled
+against an older header". That was documented and **not implemented**: `ls_open`
+tested `o.version != LS_OPTS_VERSION`, exact equality, which would have rejected
+precisely the older callers the field exists to serve. One version had existed,
+so nothing ever exercised it.
+
+It works now. `opts_size()` records how many bytes each version defines;
+`ls_open` accepts any version it knows and copies only that many, leaving newer
+fields at their zero defaults. `ls_opts_default` became a macro passing the
+*caller's* compile-time `LS_OPTS_VERSION`, so a newer library cannot write past
+a struct built from an older header — the function of the same name is retained
+for binaries that already call it. `tests/test_exact_name.c` builds a
+version-1-shaped struct by hand and checks it is still accepted, that
+`exact_name` defaults to 0 for it, and that `ls_opts_init(o, 1)` leaves the
+bytes past version 1 untouched.
+
+The general lesson is the one §6e already recorded in another key: **a
+compatibility mechanism that has never been exercised is a design note, not a
+mechanism.** This one had a version field, a documented rule, and an
+implementation that contradicted both.
+
 ## 5a. Threading and concurrency: isolation, not locking
 
 The one operation that could require atomicity is `ls_accumulate`, since it is a

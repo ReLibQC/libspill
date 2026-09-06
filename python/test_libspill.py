@@ -86,6 +86,20 @@ def main():
     ok(not os.path.exists(os.path.join(d, "scratch.libspill")),
        "the context manager unlinked the store on exit")
 
+    # exact_name: also a check that _Opts still mirrors the C struct -- the
+    # field is last, so a layout drift shows up here and nowhere else.
+    ok(not libspill.store_exists("RUNFILE", dir=d, exact_name=True),
+       "store_exists reports an absent store")
+    with libspill.open("RUNFILE", dir=d, exact_name=True, keep=True) as s:
+        s["k"] = np.arange(4, dtype=np.float64)
+    ok(os.path.exists(os.path.join(d, "RUNFILE")),
+       "exact_name writes <dir>/RUNFILE with no suffix")
+    ok(not os.path.exists(os.path.join(d, "RUNFILE.libspill")), "  ... and no suffixed file")
+    ok(libspill.store_exists("RUNFILE", dir=d, exact_name=True),
+       "store_exists reports it present")
+    with libspill.open("RUNFILE", dir=d, exact_name=True) as s:
+        ok(np.array_equal(s["k"], np.arange(4, dtype=np.float64)), "  ... and it round-trips")
+
     # ---- §4a: "LS_MAPPED is where the Python binding earns the most" ----
     with libspill.open("cache", dir=d, keep=True) as s:
         eri = np.arange(8192, dtype=np.float64)

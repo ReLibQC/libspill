@@ -77,6 +77,9 @@ struct options {
     std::size_t memory_budget = 0;
     std::string dir           = {};
     bool        direct_io     = false;
+    /* Write to <dir>/<name> verbatim, with no .libspill suffix. For callers
+     * whose own code inspects the filesystem; see the note in libspill.h. */
+    bool        exact_name    = false;
 
     ls_opts to_c() const {
         ls_opts o;
@@ -88,6 +91,7 @@ struct options {
         o.memory_budget = memory_budget;
         o.dir           = dir.empty() ? nullptr : dir.c_str();
         o.direct_io     = direct_io ? 1 : 0;
+        o.exact_name    = exact_name ? 1 : 0;
         return o;
     }
 };
@@ -310,6 +314,14 @@ private:
     bool keep_ = false;
     mutable std::string kbuf_;
 };
+
+/// Does a store of this name already exist, without creating one?
+inline bool store_exists(std::string_view name, const options &opt = {}) {
+    ls_opts o = opt.to_c();
+    int found = 0;
+    check(ls_store_exists(std::string(name).c_str(), &o, &found), "ls_store_exists");
+    return found != 0;
+}
 
 /// Convenience for the common case of a whole contiguous container.
 template <class C>

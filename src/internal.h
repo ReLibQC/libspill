@@ -50,6 +50,13 @@ typedef struct { uint64_t foff, len; } ls_hole;
 
 struct ls_store {
     int              fd;
+#ifdef LIBSPILL_HAVE_HDF5
+    /* The HDF5 backend keeps none of the extent machinery below: HDF5 places
+     * data itself, which is both the point (§7b: inspectable with h5ls) and
+     * the defect (x1.4-1.8 under varying-size churn). */
+    long             h5_file;         /* hid_t, kept opaque to this header     */
+    pthread_mutex_t  h5_lk;
+#endif
     char            *path;
     ls_opts          o;
     int              direct;          /* O_DIRECT actually in force            */
@@ -147,5 +154,24 @@ int  ls_spill_all (ls_store *s);
 /* async.c */
 int  ls_pool_start(ls_store *s);
 void ls_pool_stop (ls_store *s);
+
+/* hdf5.c -- built only when LIBSPILL_HAVE_HDF5 is defined. */
+#ifdef LIBSPILL_HAVE_HDF5
+int ls_h5_open (ls_store *s, const char *path, int existing);
+int ls_h5_close(ls_store *s);
+int ls_h5_rw   (ls_store *s, const char *key, uint64_t off, size_t n,
+                void *rbuf, const void *wbuf, int op);
+int ls_h5_size (ls_store *s, const char *key, uint64_t *n);
+int ls_h5_exists(ls_store *s, const char *key, int *found);
+int ls_h5_erase(ls_store *s, const char *key);
+int ls_h5_reserve(ls_store *s, const char *key, uint64_t nbytes);
+int ls_h5_append(ls_store *s, const char *key, size_t n, const void *buf,
+                 uint64_t *off_out);
+int ls_h5_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
+                     const void *buf, ls_reduce op, void *ctx);
+int ls_h5_set_attr(ls_store *s, const char *key, const void *blob, size_t n);
+int ls_h5_get_attr(ls_store *s, const char *key, void *blob, size_t *n);
+int ls_h5_keys (ls_store *s, char ***keys, size_t *n);
+#endif
 
 #endif /* LS_INTERNAL_H */

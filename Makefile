@@ -18,12 +18,23 @@ DEPFLAGS = -MMD -MP
 LDLIBS  += -lpthread
 
 SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
+
+# The optional HDF5 backend (§7b). Enabled when the headers are present; a
+# library built without them still accepts LS_HDF5 at compile time and refuses
+# it at ls_open with LS_ERR_BACKEND.
+HDF5_H := $(firstword $(wildcard /usr/include/hdf5.h /usr/local/include/hdf5.h))
+ifneq ($(HDF5_H),)
+SRC     += src/hdf5.c
+CFLAGS  += -DLIBSPILL_HAVE_HDF5
+LDLIBS  += -lhdf5
+endif
 OBJ  := $(SRC:.c=.o)
 LIB  := libspill.a
 SO   := libspill.so
 
 TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
-         tests/test_surveyed tests/test_crayio tests/test_mapped
+         tests/test_surveyed tests/test_crayio tests/test_mapped \
+         tests/test_hdf5
 BENCH := bench/ooc_bench
 
 # Psi4's libpsio reimplemented on libspill. Built here so the port is tested

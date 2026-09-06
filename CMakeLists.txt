@@ -23,6 +23,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 option(LIBSPILL_BUILD_FORTRAN "Build the ISO_C_BINDING Fortran module" OFF)
+option(LIBSPILL_WITH_HDF5     "Build the optional HDF5 backend (§7b)"    OFF)
 option(LIBSPILL_BUILD_TESTS   "Build the test programs"                OFF)
 option(BUILD_SHARED_LIBS      "Build a shared library"                 ON)
 
@@ -43,6 +44,19 @@ target_include_directories(spill
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_compile_features(spill PRIVATE c_std_99)
+
+# The optional HDF5 backend. Off by default: §7b keeps POSIX the default and the
+# only backend that can deliver asynchrony, and HDF5 is here for codes that
+# already link it and want scratch files h5ls can read. A library built without
+# it still accepts LS_HDF5 at compile time and refuses it at ls_open with
+# LS_ERR_BACKEND, so callers need no conditional compilation.
+if(LIBSPILL_WITH_HDF5)
+  find_package(HDF5 REQUIRED COMPONENTS C)
+  target_sources(spill PRIVATE src/hdf5.c)
+  target_compile_definitions(spill PRIVATE LIBSPILL_HAVE_HDF5)
+  target_link_libraries(spill PRIVATE ${HDF5_C_LIBRARIES})
+  target_include_directories(spill PRIVATE ${HDF5_C_INCLUDE_DIRS})
+endif()
 
 # _GNU_SOURCE is needed for O_DIRECT, fallocate and MAP_FIXED; it is PRIVATE
 # because a consumer of the public header needs none of them.
@@ -127,7 +141,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libspill.pc
 # suite so that a packager can run `ctest`.
 if(LIBSPILL_BUILD_TESTS)
   enable_testing()
-  foreach(t abi_header_test test_posix churn_libspill test_surveyed test_mapped)
+  foreach(t abi_header_test test_posix churn_libspill test_surveyed test_mapped test_hdf5)
     add_executable(${t} tests/${t}.c)
     target_link_libraries(${t} PRIVATE spill)
     target_compile_definitions(${t} PRIVATE _GNU_SOURCE)

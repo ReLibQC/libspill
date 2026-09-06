@@ -47,7 +47,8 @@ opaque bytes.
 ## Building
 
 ```sh
-cmake -S . -B build -DLIBSPILL_BUILD_FORTRAN=ON -DLIBSPILL_BUILD_TESTS=ON
+cmake -S . -B build -DLIBSPILL_BUILD_FORTRAN=ON -DLIBSPILL_BUILD_TESTS=ON \
+      -DLIBSPILL_WITH_HDF5=ON        # optional; see below
 cmake --build build -j
 cd build && ctest
 cmake --install build --prefix /where/you/want
@@ -95,6 +96,24 @@ with libspill.open("scratch", memory_budget=8 << 30) as s:
     s.accumulate("t2", o, partial, alpha=0.5)
     arr = s.map("eri")                         # NumPy over the mapping, no copy
 ```
+
+## Backends
+
+POSIX is the default and carries no dependencies. It is also the only backend
+that can deliver asynchrony: HDF5's stock build is not thread-safe and its
+thread-safe build serialises every call behind one lock, so `ls_aread` and
+`ls_awrite` return `LS_ERR_MODE` there.
+
+HDF5 is optional, for codes that already link it and want scratch files
+`h5ls` and `h5dump` can read — the per-key attribute blob becomes a native HDF5
+attribute, so shape and dtype metadata is visible to standard tooling. The cost
+is space: on the same churn protocol, through the same libspill calls, the POSIX
+backend grows to x1.13 of live data and HDF5 to x1.70. Pick it for
+inspectability, not for performance.
+
+A library built without HDF5 still accepts `LS_HDF5` at compile time and refuses
+it at `ls_open` with `LS_ERR_BACKEND`, so no consumer needs conditional
+compilation.
 
 ## Where the performance comes from
 

@@ -111,11 +111,21 @@ static void t_options(void)
     int err = 0;
     ls_store *s;
 
+    /* LS_HDF5 is optional (§7b), so both outcomes are correct and which one
+     * happens is a property of the build, not of the caller. §4b's promise is
+     * that a caller can compile against the whole option space and find out at
+     * run time -- so that is what this checks. */
     ls_opts_default(&o);
     o.backend = LS_HDF5;
-    s = ls_open("t_opt", &o, &err);
-    ok(s == NULL, "LS_HDF5 store is refused");
-    ok_rc(err, LS_ERR_BACKEND, "  ... with LS_ERR_BACKEND");
+    s = ls_open("t_opt_h", &o, &err);
+    if (s) {
+        ok(err == LS_OK, "LS_HDF5 store opens (built with the HDF5 backend)");
+        ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
+    } else {
+        ok(err == LS_ERR_BACKEND,
+           "LS_HDF5 is refused with LS_ERR_BACKEND (built without it)");
+        ok(1, "  ... which is the documented answer for a build without HDF5");
+    }
 
     /* LS_MAPPED used to be refused as "declared but not built"; it is built
      * now (tests/test_mapped.c), so the option space is fully live. */

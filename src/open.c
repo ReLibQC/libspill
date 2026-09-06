@@ -247,17 +247,45 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
         if (err) *err = LS_ERR_INVAL;
         return NULL;
     }
+#ifndef LIBSPILL_HAVE_HDF5
+    /* Declared in the enum but not built into this library (§4b): a caller can
+     * compile against the whole option space and discover at run time. */
     if (o.backend == LS_HDF5) { if (err) *err = LS_ERR_BACKEND; return NULL; }
+#else
+    /* The memory tier lives in the POSIX backend's extent layer. Ignoring a
+     * budget would misreport where the data is, so it is refused instead. */
+    if (o.backend == LS_HDF5 && (o.memory_budget != 0 || o.direct_io ||
+                                 o.parallel == LS_SHARED)) {
+        if (err) *err = LS_ERR_INVAL;
+        return NULL;
+    }
+#endif
 
     s = calloc(1, sizeof *s);
     if (!s) { if (err) *err = -ENOMEM; return NULL; }
     s->o = o;
     s->fd = -1;
+#ifdef LIBSPILL_HAVE_HDF5
+    s->h5_file = -1;
+#endif
     s->nbuckets = 64;
     s->tab = calloc(s->nbuckets, sizeof *s->tab);
     s->path = build_path(name, &o);
     if (!s->tab || !s->path) { rc = -ENOMEM; goto fail; }
 
+#ifdef LIBSPILL_HAVE_HDF5
+    if (o.backend == LS_HDF5) {
+        struct stat hst;
+        int existing = (stat(s->path, &hst) == 0 && hst.st_size > 0);
+        pthread_mutex_init(&s->toc_lk, NULL);
+        pthread_mutex_init(&s->alloc_lk, NULL);
+        pthread_mutex_init(&s->q_lk, NULL);
+        pthread_cond_init(&s->q_cv, NULL);
+        rc = ls_h5_open(s, s->path, existing);
+        if (rc != LS_OK) goto fail;
+        return s;
+    }
+#endif
     pthread_mutex_init(&s->toc_lk, NULL);
     pthread_mutex_init(&s->alloc_lk, NULL);
     pthread_mutex_init(&s->q_lk, NULL);
@@ -350,6 +378,20 @@ int ls_close(ls_store *s, int keep)
 
     if (!s) return LS_ERR_INVAL;
 
+#ifdef LIBSPILL_HAVE_HDF5
+    if (s->o.backend == LS_HDF5) {
+        int hrc = ls_h5_close(s);
+        if (!keep && s->path) unlink(s->path);
+        pthread_mutex_destroy(&s->toc_lk);
+        pthread_mutex_destroy(&s->alloc_lk);
+        pthread_mutex_destroy(&s->q_lk);
+        pthread_cond_destroy(&s->q_cv);
+        free(s->tab);
+        free(s->path);
+        free(s);
+        return hrc;
+    }
+#endif
     ls_pool_stop(s);                    /* drains in flight, as fclose flushes */
 
     /* A shared store belongs to whoever created it. Every process closing one

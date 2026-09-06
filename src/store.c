@@ -409,17 +409,34 @@ int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
     return rc;
 }
 
+/* Backend dispatch. The HDF5 path shares the validation but none of the extent
+ * machinery; §7b keeps POSIX the default and the only asynchronous backend. */
+#ifdef LIBSPILL_HAVE_HDF5
+#  define LS_IF_HDF5(s, expr) do { if ((s) && (s)->o.backend == LS_HDF5) return (expr); } while (0)
+#else
+#  define LS_IF_HDF5(s, expr) do { } while (0)
+#endif
+
 int ls_write(ls_store *s, const char *key, uint64_t off, size_t n, const void *buf)
-{ return ls_rw(s, key, off, n, NULL, buf, LS_OP_WRITE); }
+{
+    if (!s || !ls_key_ok(key) || (n && !buf)) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_rw(s, key, off, n, NULL, buf, LS_OP_WRITE));
+    return ls_rw(s, key, off, n, NULL, buf, LS_OP_WRITE);
+}
 
 int ls_read(ls_store *s, const char *key, uint64_t off, size_t n, void *buf)
-{ return ls_rw(s, key, off, n, buf, NULL, LS_OP_READ); }
+{
+    if (!s || !ls_key_ok(key) || (n && !buf)) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_rw(s, key, off, n, buf, NULL, LS_OP_READ));
+    return ls_rw(s, key, off, n, buf, NULL, LS_OP_READ);
+}
 
 /* ------------------------------------------------------- table of contents */
 
 int ls_exists(ls_store *s, const char *key, int *found)
 {
     if (!s || !found || !ls_key_ok(key)) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_exists(s, key, found));
     pthread_mutex_lock(&s->toc_lk);
     *found = ls_toc_find(s, key) != NULL;
     pthread_mutex_unlock(&s->toc_lk);
@@ -430,6 +447,7 @@ int ls_size(ls_store *s, const char *key, uint64_t *nbytes)
 {
     ls_rec *r;
     if (!s || !nbytes || !ls_key_ok(key)) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_size(s, key, nbytes));
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r) *nbytes = r->size;
@@ -442,6 +460,7 @@ int ls_erase(ls_store *s, const char *key)
     ls_rec *r;
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+    LS_IF_HDF5(s, ls_h5_erase(s, key));
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r) { ls_toc_unlink(s, r); ls_lru_drop(s, r); ls_rec_free(s, r); }
@@ -455,6 +474,7 @@ int ls_reserve(ls_store *s, const char *key, uint64_t nbytes)
     int rc;
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+    LS_IF_HDF5(s, ls_h5_reserve(s, key, nbytes));
 
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
@@ -475,6 +495,7 @@ int ls_keys(ls_store *s, char ***keys, size_t *n)
     size_t i, k = 0;
 
     if (!s || !keys || !n) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_keys(s, keys, n));
 
     pthread_mutex_lock(&s->toc_lk);
     out = s->nrec ? calloc(s->nrec, sizeof *out) : calloc(1, sizeof *out);
@@ -519,6 +540,7 @@ int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
 
     if (!s || !ls_key_ok(key) || (n && !buf)) return LS_ERR_INVAL;
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+    LS_IF_HDF5(s, ls_h5_append(s, key, n, buf, off_out));
 
     /* The offset is taken and the record extended under one lock. That is the
      * whole point: ls_size followed by ls_write is not the same thing, because
@@ -573,6 +595,19 @@ static int segv(ls_store *s, const char *key, const ls_seg *segs, size_t nseg, i
         if (segs[i].off + segs[i].len > hi) hi = segs[i].off + segs[i].len;
     }
 
+#ifdef LIBSPILL_HAVE_HDF5
+    if (s->o.backend == LS_HDF5) {
+        /* No single-lookup gain here: HDF5 resolves the dataset itself on every
+         * call, which is part of why §7b keeps it optional. */
+        for (i = 0; i < nseg; i++) {
+            rc = ls_h5_rw(s, key, segs[i].off, segs[i].len,
+                          op == LS_OP_READ ? segs[i].buf : NULL,
+                          op == LS_OP_READ ? NULL : segs[i].buf, op);
+            if (rc != LS_OK) return rc;
+        }
+        return LS_OK;
+    }
+#endif
     /* One lookup for the whole list. Against Conquest's "thousands of individual
      * scalar operations per file", that alone is most of the gain. */
     pthread_mutex_lock(&s->toc_lk);
@@ -634,6 +669,7 @@ int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n)
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
     if (n > LS_ATTR_MAX || (n && !blob)) return LS_ERR_INVAL;
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
+    LS_IF_HDF5(s, ls_h5_set_attr(s, key, blob, n));
 
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
@@ -651,6 +687,7 @@ int ls_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
     int rc = LS_OK;
 
     if (!s || !ls_key_ok(key) || !n) return LS_ERR_INVAL;
+    LS_IF_HDF5(s, ls_h5_get_attr(s, key, blob, n));
 
     pthread_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
@@ -700,6 +737,7 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
 
     if (!s || !ls_key_ok(key) || !op || (n && !buf)) return LS_ERR_INVAL;
     if (s->o.mode != LS_EXPLICIT) return LS_ERR_MODE;   /* §3: p[i] += x is yours */
+    LS_IF_HDF5(s, ls_h5_accumulate(s, key, off, n, buf, op, ctx));
     if (off + n < off) return LS_ERR_RANGE;
     if (n == 0) return LS_OK;
 

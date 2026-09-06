@@ -1362,6 +1362,54 @@ Correctness: 73 checks pass, and the suite runs clean under both valgrind
 memcheck and helgrind -- worth stating explicitly given that §7b disqualified
 HDF5 partly on heap corruption at two threads.
 
+## 7g. The HDF5 backend, built
+
+`src/hdf5.c`, off by default, enabled with `-DLIBSPILL_WITH_HDF5=ON` (CMake) or
+automatically by the Makefile when the headers are present. 39 checks in
+`tests/test_hdf5.c`, clean under memcheck. A library built without it still
+accepts `LS_HDF5` at compile time and refuses it at `ls_open` with
+`LS_ERR_BACKEND`, so no consumer needs conditional compilation — which is what
+§4b's "compile against the whole option space and discover at run time" was for.
+
+**§7b's central claim, re-measured through our own code.** The earlier figure
+came from h5py driving HDF5 directly; this runs the identical churn protocol
+through the identical libspill entry points, changing only the backend:
+
+| | file / live |
+|---|---|
+| POSIX backend | **x1.13** |
+| HDF5 backend | **x1.70** |
+
+which lands inside §7b's x1.61–1.75 band. The conclusion stands, now without
+having to trust that two different test harnesses were measuring the same thing.
+
+**What it buys, demonstrated rather than asserted.** `file` reports
+"Hierarchical Data Format (version 5) data" and `h5ls -v` lists the datasets,
+their extents and their attributes. §3a(3)'s attribute blob maps onto a native
+HDF5 attribute, so shape and dtype metadata is visible to standard tooling. For
+a code already linking HDF5 and debugging a port, that is worth something real.
+
+**What it cannot do, and says so.** `ls_aread` and `ls_awrite` return
+`LS_ERR_MODE`. This is not an omission: `H5_HAVE_THREADSAFE` is still undefined
+in the stock 1.14.6 this was built against, exactly as §7b found, so concurrent
+calls corrupt the heap; a thread-safe build serialises everything behind one
+global lock instead. Since the library cannot rely on either, every entry point
+in `src/hdf5.c` takes one lock for its whole duration — the global lock §5a
+faults NWChem for, unavoidable here and absent on POSIX. `memory_budget`,
+`O_DIRECT` and `LS_SHARED` are refused at `ls_open` rather than ignored, because
+each lives in the POSIX extent layer and silently dropping one would misreport
+where the data is.
+
+**One default that was wrong and is now measured.** §7b asks for "chunking
+defaults tuned to the access patterns these codes actually have". A fixed 1 MiB
+chunk gave `h5ls -v` *"32 logical bytes, 1048576 allocated bytes, 0.00%
+utilization"* for a four-element record: HDF5 allocates whole chunks, so a fixed
+size is a floor under every dataset in the file, and these stores hold a title
+or a nuclear-charge array beside gigabyte amplitudes. The chunk now follows the
+record's creation size, clamped to a page below and 1 MiB above; the same record
+allocates 4 KiB instead of 1 MiB, and the churn figure is unchanged because
+those records are large.
+
 ## 8. Open questions
 
 - ~~Is HDF5 an adequate backend, making this a façade?~~ **settled, partly**

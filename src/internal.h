@@ -35,6 +35,8 @@ typedef struct ls_rec {
     size_t         busy;              /* in-flight ops; eviction skips these   */
     unsigned char  attr[LS_ATTR_MAX];  /* §3a(3): opaque, never interpreted    */
     uint32_t       attrlen;
+    void          *map_addr;          /* LS_MAPPED: live mapping, or NULL      */
+    size_t         map_len;
     ls_extent     *ext;               /* in logical order; covers >= size      */
     size_t         next, ncap;
     uint64_t       ext_total;

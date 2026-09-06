@@ -116,11 +116,13 @@ static void t_options(void)
     ok(s == NULL, "LS_HDF5 store is refused");
     ok_rc(err, LS_ERR_BACKEND, "  ... with LS_ERR_BACKEND");
 
+    /* LS_MAPPED used to be refused as "declared but not built"; it is built
+     * now (tests/test_mapped.c), so the option space is fully live. */
     ls_opts_default(&o);
     o.mode = LS_MAPPED;
-    s = ls_open("t_opt", &o, &err);
-    ok(s == NULL, "LS_MAPPED store is refused in this build");
-    ok_rc(err, LS_ERR_MODE, "  ... with LS_ERR_MODE");
+    s = ls_open("t_opt_m", &o, &err);
+    ok(s != NULL && err == LS_OK, "LS_MAPPED store opens");
+    if (s) ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
 
     /* the combination that is wrong in principle outranks the one that is
      * merely not built yet, so this stays stable when LS_MAPPED lands */

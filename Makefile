@@ -19,9 +19,10 @@ LDLIBS  += -lpthread
 SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
 OBJ  := $(SRC:.c=.o)
 LIB  := libspill.a
+SO   := libspill.so
 
 TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
-         tests/test_surveyed tests/test_crayio
+         tests/test_surveyed tests/test_crayio tests/test_mapped
 BENCH := bench/ooc_bench
 
 # Psi4's libpsio reimplemented on libspill. Built here so the port is tested
@@ -44,10 +45,16 @@ FORT_OBJ  := fortran/libspill.o port/openmolcas/molcas_kinds.o \
 FORT_TEST := port/openmolcas/test_dafile_shim port/openmolcas/test_runfile_shim
 DEP   := $(OBJ:.o=.d) $(TESTS:=.d) $(BENCH:=.d)
 
-all: $(LIB)
+all: $(LIB) $(SO)
 
 $(LIB): $(OBJ)
 	$(AR) rcs $@ $(OBJ)
+
+# The Python binding loads the library through ctypes, so it needs a shared
+# object. -fPIC is applied to a separate set of objects rather than to the
+# static library, which callers link into their own binaries.
+$(SO): $(SRC) include/libspill.h src/internal.h
+	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(SRC) $(LDLIBS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
@@ -82,6 +89,14 @@ port/psi4/conformance_psi4: port/psi4/conformance_psi4.cc $(PORT_SRC) $(LIB)
 	    -I$(PSI4_DIR)/src -I$(PSI4_DIR)/include \
 	    -o $@ port/psi4/conformance_psi4.cc $(PORT_SRC) $(LIB) $(LDLIBS)
 
+# The Python binding needs the shared object and numpy; skipped without either.
+check-python: $(SO)
+	@if python3 -c "import numpy" >/dev/null 2>&1; then \
+	    python3 python/test_libspill.py; \
+	 else \
+	    echo "  skipped: numpy not available"; \
+	 fi
+
 check-psi4:
 	@if [ -f "$(PSI4_DIR)/src/psi4/libpsio/psio.h" ]; then \
 	    $(MAKE) --no-print-directory port/psi4/conformance_psi4 && ./port/psi4/conformance_psi4; \
@@ -97,15 +112,16 @@ check-c: $(TESTS) $(PORT_TEST) $(CXX_TEST)
 
 check: check-c $(FORT_TEST)
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
+	@echo "== python binding"; $(MAKE) --no-print-directory check-python
 	@echo "== psi4 header conformance"; $(MAKE) --no-print-directory check-psi4
 
 bench: $(BENCH)
 
 clean:
-	rm -f $(OBJ) $(DEP) $(LIB) $(TESTS) $(BENCH) $(PORT_TEST) \
+	rm -f $(OBJ) $(DEP) $(LIB) $(SO) $(TESTS) $(BENCH) $(PORT_TEST) \
 	      $(FORT_OBJ) $(FORT_TEST) fortran/*.mod port/psi4/conformance_psi4 \
 	      $(CXX_TEST)
 
 -include $(DEP)
 
-.PHONY: all check check-c check-psi4 bench clean
+.PHONY: all check check-c check-psi4 check-python bench clean

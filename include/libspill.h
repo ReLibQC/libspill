@@ -261,6 +261,25 @@ typedef struct {
 int ls_readv (ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
 int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
 
+/* ---------------------------------------------------------------- mapping
+ * Valid only on a store opened LS_MAPPED (§3). On such a store the
+ * asynchronous entry points and ls_accumulate return LS_ERR_MODE rather than
+ * pretending: you cannot prefetch a page fault, and an interface that silently
+ * degraded ls_aread to a synchronous touch would be lying about the one
+ * property it exists to provide. ls_read and ls_write do remain available, as a
+ * copy through the mapping, so that a port can move call sites over gradually.
+ *
+ * `len` receives the record's logical size. The mapping itself is rounded up to
+ * whole pages, so writing past `len` may touch bytes the store does not
+ * consider part of the record.
+ *
+ * Errors under a mapping arrive as SIGBUS, in the caller's instruction stream
+ * rather than as a return code. The library documents this and does not attempt
+ * to hide it. A store closes any mapping it still holds.
+ */
+int ls_map  (ls_store *s, const char *key, void **addr, size_t *len);
+int ls_unmap(ls_store *s, const char *key);
+
 /* ------------------------------------------------------------- accumulate
  * Read-modify-write: buf is combined into what is stored, by the CALLER'S
  * arithmetic. Taken from NWChem's TCE, whose add_block sits alongside
@@ -313,8 +332,7 @@ int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
 /* Not in this version, and shaped here so that adding them stays ABI-compatible
  * (new functions, new enum values, new trailing ls_opts members):
  *
- *   ls_map / ls_unmap        LS_MAPPED mode. DESIGN.md 3.
- *   ls_aaccumulate          the asynchronous form; no consumer has asked, and
+   ls_aaccumulate          the asynchronous form; no consumer has asked, and
  *                           the reduction would run on an I/O thread, which is
  *                           a contract worth stating before offering.
  *   ls_read_strided,         superseded by ls_readv/ls_writev above: a regular

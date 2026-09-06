@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -84,6 +85,7 @@ void ls_toc_unlink(ls_store *s, ls_rec *r)
 void ls_rec_free(ls_store *s, ls_rec *r)
 {
     if (!r) return;
+    if (r->map_addr) munmap(r->map_addr, r->map_len);   /* close unmaps */
     if (r->mem) {
         if (s->resident >= r->mem_cap) s->resident -= (size_t)r->mem_cap;
         free(r->mem);

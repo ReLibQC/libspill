@@ -229,7 +229,13 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
     /* §4b: the combinations that are wrong in principle are refused before the
      * ones that are merely not built yet, so that behaviour does not change
      * when LS_MAPPED and LS_HDF5 land. */
-    if (o.mode == LS_MAPPED && (o.backend != LS_POSIX || o.memory_budget != 0)) {
+    /* §3: LS_MAPPED implies the POSIX backend, since mapping an HDF5 dataset is
+     * not meaningful; §4b: a memory budget on a mapped store means nothing,
+     * because its cache is the kernel's page cache. O_DIRECT and mmap are
+     * likewise mutually exclusive -- the point of one is to bypass what the
+     * other maps. */
+    if (o.mode == LS_MAPPED &&
+        (o.backend != LS_POSIX || o.memory_budget != 0 || o.direct_io)) {
         if (err) *err = LS_ERR_INVAL;
         return NULL;
     }
@@ -241,7 +247,6 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
         return NULL;
     }
     if (o.backend == LS_HDF5) { if (err) *err = LS_ERR_BACKEND; return NULL; }
-    if (o.mode    == LS_MAPPED) { if (err) *err = LS_ERR_MODE;  return NULL; }
 
     s = calloc(1, sizeof *s);
     if (!s) { if (err) *err = -ENOMEM; return NULL; }

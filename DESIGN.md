@@ -508,6 +508,52 @@ Three things the typed layer adds that the C core cannot:
 Still absent from §4a's promises: the Python binding, and `LS_MAPPED`, which the
 Python layer is said to earn the most from.
 
+## 4d. LS_MAPPED and the Python binding
+
+Both of §4a's remaining promises are built. `tests/test_mapped.c` has 23 checks,
+`python/test_libspill.py` has 20, and `make check` runs each and skips the
+Python one when numpy is absent.
+
+**Mapping a record that is not contiguous.** §3 treats `ls_map` as almost free —
+"mapping is a modest addition over the POSIX backend". It is not quite, and the
+reason is our own design: a record is a *list of extents*, so it has no
+contiguous run in the file to hand to one `mmap` call. It can still be handed to
+the caller as one pointer. Reserve the whole logical span with an anonymous
+`PROT_NONE` mapping, then map each extent over its own slice with `MAP_FIXED`.
+This is legal precisely because extents are `LS_ALIGN`-aligned and
+`LS_ALIGN`-sized, which turns out to be a reason to keep that alignment quite
+apart from `O_DIRECT`. The multi-extent case is the one the test spends most of
+its checks on, because a record built from many extents reads correctly through
+`ls_read` and incorrectly through a wrongly stitched mapping — the two paths have
+to be separated to see it.
+
+**One combination §3 does not mention: `O_DIRECT` and `LS_MAPPED`.** They are
+mutually exclusive — the point of one is to bypass what the other maps — so
+`ls_open` refuses the pair with `LS_ERR_INVAL`, alongside the backend and
+budget restrictions §4b already settled.
+
+**The Python binding goes through the C ABI rather than being an extension
+module**, which is what §4b's stability is *for*: no compiler at install time,
+and no rebuild when libspill is upgraded in place. `ls::error`'s Python
+counterpart subclasses `OSError` and keeps `.code`, so `-ENOSPC` survives into
+Python as something a caller can branch on.
+
+**§4a is right that mapping is where the Python layer earns the most.** A mapped
+record is a NumPy array over the mapping, so `arr = s.map("eri")` is qp2's
+access pattern in one line with no copy anywhere — the test proves the *absence*
+of the copy by writing through the array, closing, reopening, and reading the
+values back through the ordinary API. `map(shape=(64,128))` reshapes without
+copying too.
+
+**What mapping still refuses, and says so.** `ls_aread`, `ls_awrite` and
+`ls_accumulate` return `LS_ERR_MODE` on a mapped store rather than silently
+degrading: you cannot prefetch a page fault, and `p[i] += x` is the caller's
+own accumulate (§3's table). `ls_read` and `ls_write` do remain available, as a
+copy through the mapping, so a port can move its call sites over gradually.
+Errors under a mapping arrive as `SIGBUS`, in the caller's instruction stream
+rather than as a return code — the library documents that and cannot do
+otherwise.
+
 ## 4b. The ABI contract
 
 §4 sketches the calls; this settles the parts a second implementer would

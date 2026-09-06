@@ -188,14 +188,13 @@ check-clean:
 	   echo "  ^ absolute local paths in tracked files"; exit 1; \
 	 else echo "  no absolute local paths outside DESIGN.md"; fi
 
-check-c: $(TESTS) $(PORT_TEST) $(CXX_TEST)
+check-c: check-clean $(TESTS) $(PORT_TEST) $(CXX_TEST)
 	@for t in $(TESTS) $(PORT_TEST) $(CXX_TEST); do echo "== $$t"; ./$$t || exit 1; done
 
 check: check-c $(FORT_TEST)
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
 	@echo "== python binding"; $(MAKE) --no-print-directory check-python
 	@echo "== install and consume"; $(MAKE) --no-print-directory check-install
-	@echo "== repository hygiene"; $(MAKE) --no-print-directory check-clean
 	@echo "== psi4 header conformance"; $(MAKE) --no-print-directory check-psi4
 
 bench: $(BENCH)

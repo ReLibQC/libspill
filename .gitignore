@@ -8,6 +8,12 @@
 *.so
 *.so.*
 
+# out-of-source build directories
+build/
+_build/
+cmake-build*/
+prefix/
+
 tests/abi_header_test
 tests/test_posix
 tests/churn_libspill

@@ -33,19 +33,20 @@
 
 module daf_ls_state
   use, intrinsic :: iso_c_binding
+  use molcas_kinds, only: iwp
   use libspill
   implicit none
   public
 
-  integer, parameter :: MxFile = 500
-  integer, parameter :: MBl_wa = 8, MBl_nwa = 512
+  integer(iwp), parameter :: MxFile = 500
+  integer(iwp), parameter :: MBl_wa = 8, MBl_nwa = 512
 
   type :: unit_t
     type(c_ptr) :: store = c_null_ptr
     type(c_ptr) :: req   = c_null_ptr      ! outstanding async request, if any
-    integer     :: mbl   = MBl_nwa
+    integer(iwp) :: mbl  = MBl_nwa
     integer(c_int64_t) :: addr = 0         ! cursor in bytes, mirroring Addr()
-    logical     :: open  = .false.
+    logical      :: open = .false.
     character(len=256) :: name = ' '
   end type unit_t
 
@@ -59,8 +60,8 @@ contains
   ! by offset alone, so there is nothing for a key space to distinguish. The
   ! keyed layer is RunFile, one level up.
   subroutine daf_drain(Lu)
-    integer, intent(in) :: Lu
-    integer :: rc
+    integer(iwp), intent(in) :: Lu
+    integer(c_int) :: rc
     if (c_associated(units(Lu)%req)) then
       rc = ls_wait_f(units(Lu)%req)
       units(Lu)%req = c_null_ptr
@@ -93,11 +94,11 @@ end subroutine daf_ls_set_dir
 subroutine DaName_Internal(Lu, Name, wa)
   use daf_ls_state
   implicit none
-  integer, intent(in) :: Lu
+  integer(iwp), intent(in) :: Lu
   character(len=*), intent(in) :: Name
   logical, intent(in) :: wa
   type(ls_opts_t) :: o
-  integer :: err
+  integer(c_int) :: err
 
   if ((Lu < 1) .or. (Lu > MxFile)) then
     write(6,*) 'DaName: unit out of range: ', Lu
@@ -122,15 +123,17 @@ subroutine DaName_Internal(Lu, Name, wa)
 end subroutine DaName_Internal
 
 subroutine DaName(Lu, Name)
+  use molcas_kinds, only: iwp
   implicit none
-  integer, intent(in) :: Lu
+  integer(iwp), intent(in) :: Lu
   character(len=*), intent(in) :: Name
   call DaName_Internal(Lu, Name, .false.)
 end subroutine DaName
 
 subroutine DaName_wa(Lu, Name)
+  use molcas_kinds, only: iwp
   implicit none
-  integer, intent(in) :: Lu
+  integer(iwp), intent(in) :: Lu
   character(len=*), intent(in) :: Name
   call DaName_Internal(Lu, Name, .true.)
 end subroutine DaName_wa
@@ -138,18 +141,19 @@ end subroutine DaName_wa
 subroutine DaClos(Lu)
   use daf_ls_state
   implicit none
-  integer, intent(in) :: Lu
-  integer :: rc
+  integer(iwp), intent(in) :: Lu
+  integer(c_int) :: rc
   if (.not. units(Lu)%open) return
   call daf_drain(Lu)
-  rc = ls_close_f(units(Lu)%store, 0)
+  rc = ls_close_f(units(Lu)%store, 0_c_int)
   units(Lu)%open = .false.
   units(Lu)%store = c_null_ptr
 end subroutine DaClos
 
 subroutine DaEras(Lu)
+  use molcas_kinds, only: iwp
   implicit none
-  integer, intent(in) :: Lu
+  integer(iwp), intent(in) :: Lu
   call DaClos(Lu)
 end subroutine DaEras
 
@@ -157,10 +161,10 @@ end subroutine DaEras
 subroutine bDaFile(Lu, iOpt, Buf, lBuf, iDisk)
   use daf_ls_state
   implicit none
-  integer, intent(in) :: Lu, iOpt, lBuf
+  integer(iwp), intent(in) :: Lu, iOpt, lBuf
   character, intent(inout) :: Buf(*)
-  integer, intent(inout) :: iDisk
-  integer :: rc
+  integer(iwp), intent(inout) :: iDisk
+  integer(c_int) :: rc
   integer(c_int64_t) :: off
   type(c_ptr) :: bp
 
@@ -177,7 +181,7 @@ subroutine bDaFile(Lu, iOpt, Buf, lBuf, iDisk)
     return
   case (0)                          ! dummy write: advance the cursor only
     units(Lu)%addr = int(iDisk, c_int64_t) + lBuf
-    iDisk = int(units(Lu)%addr)
+    iDisk = int(units(Lu)%addr, iwp)
     return
   case (8)                          ! position at end of file
     call daf_drain(Lu)
@@ -185,7 +189,7 @@ subroutine bDaFile(Lu, iOpt, Buf, lBuf, iDisk)
       integer(c_int64_t) :: n
       rc = ls_size_f(units(Lu)%store, 'd', n)
       if (rc /= LS_OK) n = 0
-      iDisk = int(n)
+      iDisk = int(n, iwp)
     end block
     return
   end select
@@ -198,13 +202,13 @@ subroutine bDaFile(Lu, iOpt, Buf, lBuf, iDisk)
 
   select case (iOpt)
   case (1)
-    rc = ls_write_f(units(Lu)%store, 'd', off, lBuf, bp)
+    rc = ls_write_f(units(Lu)%store, 'd', off, int(lBuf, c_size_t), bp)
   case (2)
-    rc = ls_read_f (units(Lu)%store, 'd', off, lBuf, bp)
+    rc = ls_read_f (units(Lu)%store, 'd', off, int(lBuf, c_size_t), bp)
   case (6)
-    rc = ls_awrite_f(units(Lu)%store, 'd', off, lBuf, bp, units(Lu)%req)
+    rc = ls_awrite_f(units(Lu)%store, 'd', off, int(lBuf, c_size_t), bp, units(Lu)%req)
   case (7)
-    rc = ls_aread_f (units(Lu)%store, 'd', off, lBuf, bp, units(Lu)%req)
+    rc = ls_aread_f (units(Lu)%store, 'd', off, int(lBuf, c_size_t), bp, units(Lu)%req)
   case (99)                          ! dummy read: does the data exist?
     block
       integer(c_int64_t) :: n
@@ -240,10 +244,11 @@ contains
 end subroutine bDaFile
 
 subroutine DaFile(Lu, iOpt, Buf, lBuf, iDisk)
+  use molcas_kinds, only: iwp
   implicit none
-  integer, intent(in) :: Lu, iOpt, lBuf
+  integer(iwp), intent(in) :: Lu, iOpt, lBuf
   character, intent(inout) :: Buf(*)
-  integer, intent(inout) :: iDisk
+  integer(iwp), intent(inout) :: iDisk
   call bDaFile(Lu, iOpt, Buf, lBuf, iDisk)
 end subroutine DaFile
 
@@ -254,11 +259,11 @@ subroutine dDaFile(Lu, iOpt, Buf, lBuf, iDisk)
   use, intrinsic :: iso_c_binding
   use daf_ls_state
   implicit none
-  integer, intent(in) :: Lu, iOpt, lBuf
+  integer(iwp), intent(in) :: Lu, iOpt, lBuf
   real(c_double), target, intent(inout) :: Buf(*)
-  integer, intent(inout) :: iDisk
+  integer(iwp), intent(inout) :: iDisk
   character, pointer :: cBuf(:)
-  integer :: nbytes, bdisk, mbl
+  integer(iwp) :: nbytes, bdisk, mbl
 
   mbl = units(Lu)%mbl
   nbytes = lBuf * 8
@@ -273,11 +278,11 @@ subroutine iDaFile(Lu, iOpt, Buf, lBuf, iDisk)
   use, intrinsic :: iso_c_binding
   use daf_ls_state
   implicit none
-  integer, intent(in) :: Lu, iOpt, lBuf
+  integer(iwp), intent(in) :: Lu, iOpt, lBuf
   integer(c_int32_t), target, intent(inout) :: Buf(*)
-  integer, intent(inout) :: iDisk
+  integer(iwp), intent(inout) :: iDisk
   character, pointer :: cBuf(:)
-  integer :: nbytes, bdisk, mbl
+  integer(iwp) :: nbytes, bdisk, mbl
 
   mbl = units(Lu)%mbl
   nbytes = lBuf * 4

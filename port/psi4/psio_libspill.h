@@ -26,17 +26,32 @@
 
 #include <string>
 
+/* Two ways to build this shim.
+ *
+ * By default it uses psio_types.h, a copy of Psi4's public types, so the port
+ * can be compiled and tested without a Psi4 tree.
+ *
+ * With -DPSIO_USE_PSI4_HEADERS it includes Psi4's own psio.h instead and
+ * declares nothing that Psi4 already declares. That is the conformance build:
+ * every entry point below is then checked against Psi4's real declaration
+ * rather than against our copy of it, and a signature that has drifted shows up
+ * as a link error rather than at integration time. See
+ * port/psi4/conformance_psi4.cc. */
+#ifdef PSIO_USE_PSI4_HEADERS
+#include "psi4/libpsio/psio.h"
+#else
 #include "psio_types.h"
+#endif
 
 namespace psi {
 
+#ifndef PSIO_USE_PSI4_HEADERS
 psio_address psio_get_address(psio_address start, size_t shift);
 psio_address psio_get_global_address(psio_address entry_start, psio_address rel_address);
 
 void psio_error(size_t unit, size_t errval, std::string prev_msg = "");
 
 int psio_init();
-int psio_done();
 
 int  psio_open(size_t unit, int status);
 int  psio_close(size_t unit, int keep);
@@ -49,11 +64,15 @@ int psio_read_entry(size_t unit, const char *key, char *buffer, size_t size);
 
 psio_tocentry *psio_tocscan(size_t unit, const char *key);
 bool psio_tocentry_exists(size_t unit, const char *key);
-bool psio_tocdel(size_t unit, const char *key);
 void psio_tocprint(size_t unit);
 int  psio_tocwrite(size_t unit);
 size_t psio_rd_toclen(size_t unit);
+#endif
 
+/* Not declared by Psi4's psio.h: psio_done has no counterpart there, and tocdel
+ * and zero_disk are PSIO class methods rather than free functions. */
+int psio_done();
+bool psio_tocdel(size_t unit, const char *key);
 void psio_zero_disk(size_t unit, const char *key, size_t rows, size_t cols);
 
 /* Not part of Psi4's API: lets the test point the shim at a scratch directory,

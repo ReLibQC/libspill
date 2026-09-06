@@ -45,19 +45,15 @@
 
 module runfile_ls
   use, intrinsic :: iso_c_binding
+  use molcas_kinds, only: iwp, wp
   use libspill
   implicit none
   public
 
-  ! OpenMolcas's Definitions module supplies these; ISO_C_BINDING kinds stand in
-  ! so the shim builds outside the tree. A 32-bit-integer build would set
-  ! iwp = c_int32_t, which is why the item size is computed rather than assumed.
-  integer, parameter :: iwp = c_int64_t, wp = c_double
-
   ! verbatim from runfile_data.F90
-  integer, parameter :: lw = 16
-  integer, parameter :: rcOK = 0, rcNotFound = 1, rcWrongType = 2
-  integer, parameter :: TypUnk = 0, TypInt = 1, TypDbl = 2, TypStr = 3, TypLgl = 4
+  integer(iwp), parameter :: lw = 16
+  integer(iwp), parameter :: rcOK = 0, rcNotFound = 1, rcWrongType = 2
+  integer(iwp), parameter :: TypUnk = 0, TypInt = 1, TypDbl = 2, TypStr = 3, TypLgl = 4
 
   type(c_ptr), save :: run_store = c_null_ptr
   logical, save     :: run_open = .false.
@@ -70,8 +66,8 @@ contains
   ! Bytes per item for a record type. gzRWRun dispatches to iDaFile, dDaFile or
   ! cDaFile, so the item size is the Fortran kind's, not a constant.
   function item_bytes(RecTyp) result(n)
-    integer, intent(in) :: RecTyp
-    integer :: n
+    integer(iwp), intent(in) :: RecTyp
+    integer(iwp) :: n
     select case (RecTyp)
       case (TypInt) ; n = storage_size(1_iwp) / 8
       case (TypDbl) ; n = storage_size(1.0_wp) / 8
@@ -93,9 +89,9 @@ contains
   end function key_of
 
   subroutine run_ensure(iRc)
-    integer, intent(out) :: iRc
+    integer(iwp), intent(out) :: iRc
     type(ls_opts_t) :: o
-    integer :: err
+    integer(c_int) :: err
     iRc = rcOK
     if (run_open) return
     o = ls_defaults()
@@ -114,26 +110,27 @@ contains
   ! store never interprets, which is exactly the concession that section makes.
   subroutine meta_put(k, nData, RecTyp, iRc)
     character(len=*), intent(in) :: k
-    integer, intent(in) :: nData, RecTyp
-    integer, intent(out) :: iRc
+    integer(iwp), intent(in) :: nData, RecTyp
+    integer(c_int), intent(out) :: iRc
     integer(c_int32_t), target :: meta(2)
     meta(1) = int(RecTyp, c_int32_t)
     meta(2) = int(nData, c_int32_t)
-    iRc = ls_set_attr_f(run_store, k, c_loc(meta), 8)
+    iRc = ls_set_attr_f(run_store, k, c_loc(meta), 8_c_size_t)
   end subroutine meta_put
 
   subroutine meta_get(k, nData, RecTyp, found)
     character(len=*), intent(in) :: k
-    integer, intent(out) :: nData, RecTyp
+    integer(iwp), intent(out) :: nData, RecTyp
     logical, intent(out) :: found
     integer(c_int32_t), target :: meta(2)
-    integer :: n, rc
+    integer(c_size_t) :: n
+    integer(c_int) :: rc
     n = 8
     rc = ls_get_attr_f(run_store, k, c_loc(meta), n)
     found = (rc == LS_OK) .and. (n == 8)
     if (found) then
-      RecTyp = int(meta(1))
-      nData  = int(meta(2))
+      RecTyp = int(meta(1), iwp)
+      nData  = int(meta(2), iwp)
     else
       RecTyp = TypUnk
       nData  = 0
@@ -148,9 +145,9 @@ subroutine NameRun(fname)
   use runfile_ls
   implicit none
   character(len=*), intent(in) :: fname
-  integer :: rc
+  integer(c_int) :: rc
   if (run_open) then
-    rc = ls_close_f(run_store, 1)
+    rc = ls_close_f(run_store, 1_c_int)
     run_open = .false.
   end if
   run_name = fname
@@ -175,9 +172,9 @@ end subroutine runfile_ls_set_dir
 subroutine Fin_Run_Use
   use runfile_ls
   implicit none
-  integer :: rc
+  integer(c_int) :: rc
   if (run_open) then
-    rc = ls_close_f(run_store, 1)
+    rc = ls_close_f(run_store, 1_c_int)
     run_open = .false.
   end if
 end subroutine Fin_Run_Use
@@ -185,11 +182,12 @@ end subroutine Fin_Run_Use
 subroutine gxWrRun(iRc, Label, cData, nData, iOpt, RecTyp)
   use runfile_ls
   implicit none
-  integer, intent(out) :: iRc
+  integer(iwp), intent(out) :: iRc
   character(len=*), intent(in) :: Label
   character, intent(in) :: cData(*)
-  integer, intent(in) :: nData, iOpt, RecTyp
-  integer :: nbytes, rc
+  integer(iwp), intent(in) :: nData, iOpt, RecTyp
+  integer(iwp) :: nbytes
+  integer(c_int) :: rc
 
   call gxWrRun_Internal(cData)
 
@@ -220,7 +218,7 @@ contains
     ! extent when the record grows: libspill's free list takes the old space
     ! back. This is the whole of what gxWrRun's 90 lines were doing.
     if (nbytes > 0) then
-      rc = ls_write_f(run_store, k, 0_c_int64_t, nbytes, c_loc(B(1)))
+      rc = ls_write_f(run_store, k, 0_c_int64_t, int(nbytes, c_size_t), c_loc(B(1)))
       if (rc /= LS_OK) then
         write(6,*) 'gxWrRun: ', trim(Label), ': ', trim(ls_strerror_f(rc))
         iRc = rcNotFound
@@ -236,11 +234,11 @@ end subroutine gxWrRun
 subroutine gxRdRun(iRc, Label, cData, nData, iOpt, RecTyp)
   use runfile_ls
   implicit none
-  integer, intent(out) :: iRc
+  integer(iwp), intent(out) :: iRc
   character(len=*), intent(in) :: Label
   character, intent(inout) :: cData(*)
-  integer, intent(in) :: nData, iOpt, RecTyp
-  integer :: rc
+  integer(iwp), intent(in) :: nData, iOpt, RecTyp
+  integer(c_int) :: rc
 
   call gxRdRun_Internal(cData)
 
@@ -249,7 +247,7 @@ contains
   subroutine gxRdRun_Internal(B)
     character, target, intent(inout) :: B(*)
     character(len=:), allocatable :: k
-    integer :: haveN, haveTyp, nbytes
+    integer(iwp) :: haveN, haveTyp, nbytes
     logical :: found
 
     if (iOpt /= 0) call SysAbendMsg('gxRdRun', 'Illegal option flag', ' ')
@@ -267,7 +265,7 @@ contains
 
     nbytes = nData * item_bytes(RecTyp)
     if (nbytes > 0) then
-      rc = ls_read_f(run_store, k, 0_c_int64_t, nbytes, c_loc(B(1)))
+      rc = ls_read_f(run_store, k, 0_c_int64_t, int(nbytes, c_size_t), c_loc(B(1)))
       if (rc /= LS_OK) then
         write(6,*) 'gxRdRun: ', trim(Label), ': ', trim(ls_strerror_f(rc))
         iRc = rcNotFound
@@ -284,9 +282,9 @@ end subroutine gxRdRun
 subroutine ffxRun(iRc, Label, nData, RecTyp, iOpt)
   use runfile_ls
   implicit none
-  integer, intent(out) :: iRc, nData, RecTyp
+  integer(iwp), intent(out) :: iRc, nData, RecTyp
   character(len=*), intent(in) :: Label
-  integer, intent(in) :: iOpt
+  integer(iwp), intent(in) :: iOpt
   logical :: found
 
   if (iOpt /= 0) call SysAbendMsg('ffxRun', 'Illegal option flag', ' ')

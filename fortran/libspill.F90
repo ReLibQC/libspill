@@ -220,58 +220,58 @@ contains
     call c_opts_default(o)
   end function ls_defaults
 
+  ! Every argument below carries an explicit C-matching kind. An ABI binding
+  ! whose dummies are plain `integer` breaks under -fdefault-integer-8 or any
+  ! caller whose default width differs, silently and only for large values.
   function ls_open_f(name, o, err) result(s)
     character(len=*), intent(in) :: name
     type(ls_opts_t), intent(in) :: o
-    integer, intent(out) :: err
+    integer(c_int), intent(out) :: err
     type(c_ptr) :: s
-    integer(c_int) :: e
-    s = c_open(cstr(name), o, e)
-    err = int(e)
+    s = c_open(cstr(name), o, err)
   end function ls_open_f
 
   function ls_close_f(s, keep) result(rc)
     type(c_ptr), intent(in) :: s
-    integer, intent(in) :: keep
-    integer :: rc
-    rc = int(c_close(s, int(keep, c_int)))
+    integer(c_int), intent(in) :: keep
+    integer(c_int) :: rc
+    rc = c_close(s, keep)
   end function ls_close_f
 
   function ls_write_f(s, key, off, nbytes, buf) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(in) :: off
-    integer, intent(in) :: nbytes
+    integer(c_size_t), intent(in) :: nbytes
     type(c_ptr), intent(in) :: buf
-    integer :: rc
-    rc = int(c_write(s, cstr(key), off, int(nbytes, c_size_t), buf))
+    integer(c_int) :: rc
+    rc = c_write(s, cstr(key), off, nbytes, buf)
   end function ls_write_f
 
   function ls_read_f(s, key, off, nbytes, buf) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(in) :: off
-    integer, intent(in) :: nbytes
+    integer(c_size_t), intent(in) :: nbytes
     type(c_ptr), intent(in) :: buf
-    integer :: rc
-    rc = int(c_read(s, cstr(key), off, int(nbytes, c_size_t), buf))
+    integer(c_int) :: rc
+    rc = c_read(s, cstr(key), off, nbytes, buf)
   end function ls_read_f
 
   function ls_reserve_f(s, key, nbytes) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(in) :: nbytes
-    integer :: rc
-    rc = int(c_reserve(s, cstr(key), nbytes))
+    integer(c_int) :: rc
+    rc = c_reserve(s, cstr(key), nbytes)
   end function ls_reserve_f
 
   function ls_exists_f(s, key, found) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     logical, intent(out) :: found
-    integer :: rc
-    integer(c_int) :: f
-    rc = int(c_exists(s, cstr(key), f))
+    integer(c_int) :: rc, f
+    rc = c_exists(s, cstr(key), f)
     found = (f /= 0)
   end function ls_exists_f
 
@@ -279,93 +279,89 @@ contains
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(out) :: nbytes
-    integer :: rc
-    rc = int(c_size(s, cstr(key), nbytes))
+    integer(c_int) :: rc
+    rc = c_size(s, cstr(key), nbytes)
   end function ls_size_f
 
   function ls_erase_f(s, key) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
-    integer :: rc
-    rc = int(c_erase(s, cstr(key)))
+    integer(c_int) :: rc
+    rc = c_erase(s, cstr(key))
   end function ls_erase_f
 
   function ls_awrite_f(s, key, off, nbytes, buf, req) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(in) :: off
-    integer, intent(in) :: nbytes
+    integer(c_size_t), intent(in) :: nbytes
     type(c_ptr), intent(in) :: buf
     type(c_ptr), intent(out) :: req
-    integer :: rc
-    rc = int(c_awrite(s, cstr(key), off, int(nbytes, c_size_t), buf, req))
+    integer(c_int) :: rc
+    rc = c_awrite(s, cstr(key), off, nbytes, buf, req)
   end function ls_awrite_f
 
   function ls_aread_f(s, key, off, nbytes, buf, req) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     integer(c_int64_t), intent(in) :: off
-    integer, intent(in) :: nbytes
+    integer(c_size_t), intent(in) :: nbytes
     type(c_ptr), intent(in) :: buf
     type(c_ptr), intent(out) :: req
-    integer :: rc
-    rc = int(c_aread(s, cstr(key), off, int(nbytes, c_size_t), buf, req))
+    integer(c_int) :: rc
+    rc = c_aread(s, cstr(key), off, nbytes, buf, req)
   end function ls_aread_f
 
   function ls_wait_f(req) result(rc)
     type(c_ptr), intent(in) :: req
-    integer :: rc
-    rc = int(c_wait(req))
+    integer(c_int) :: rc
+    rc = c_wait(req)
   end function ls_wait_f
 
   function ls_test_f(req, done) result(rc)
     type(c_ptr), intent(in) :: req
     logical, intent(out) :: done
-    integer :: rc
-    integer(c_int) :: d
-    rc = int(c_test(req, d))
+    integer(c_int) :: rc, d
+    rc = c_test(req, d)
     done = (d /= 0)
   end function ls_test_f
 
   function ls_append_f(s, key, nbytes, buf, off) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
-    integer, intent(in) :: nbytes
+    integer(c_size_t), intent(in) :: nbytes
     type(c_ptr), intent(in) :: buf
     integer(c_int64_t), intent(out) :: off
-    integer :: rc
-    rc = int(c_append(s, cstr(key), int(nbytes, c_size_t), buf, off))
+    integer(c_int) :: rc
+    rc = c_append(s, cstr(key), nbytes, buf, off)
   end function ls_append_f
 
   function ls_set_attr_f(s, key, blob, nbytes) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     type(c_ptr), intent(in) :: blob
-    integer, intent(in) :: nbytes
-    integer :: rc
-    rc = int(c_set_attr(s, cstr(key), blob, int(nbytes, c_size_t)))
+    integer(c_size_t), intent(in) :: nbytes
+    integer(c_int) :: rc
+    rc = c_set_attr(s, cstr(key), blob, nbytes)
   end function ls_set_attr_f
 
   function ls_get_attr_f(s, key, blob, nbytes) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
     type(c_ptr), intent(in) :: blob
-    integer, intent(inout) :: nbytes
-    integer :: rc
-    integer(c_size_t) :: n
-    n = int(nbytes, c_size_t)
-    rc = int(c_get_attr(s, cstr(key), blob, n))
-    nbytes = int(n)
+    integer(c_size_t), intent(inout) :: nbytes
+    integer(c_int) :: rc
+    rc = c_get_attr(s, cstr(key), blob, nbytes)
   end function ls_get_attr_f
 
   function ls_strerror_f(err) result(text)
-    integer, intent(in) :: err
+    integer(c_int), intent(in) :: err
     character(len=128) :: text
     character(kind=c_char, len=1) :: buf(128)
     type(c_ptr) :: p
     integer :: i
     buf = c_null_char
-    p = c_strerror(int(err, c_int), buf, int(128, c_size_t))
+    p = c_strerror(err, buf, int(128, c_size_t))
     text = ' '
     do i = 1, 128
       if (buf(i) == c_null_char) exit

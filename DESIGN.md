@@ -929,6 +929,54 @@ For contrast, §7b disqualified HDF5 as a sole backend at x1.4–1.8 under
 varying-size churn. RunFile is an order of magnitude worse than the thing we
 rejected, inside a target code.
 
+## 6e. Conformance: checking the shims against the real declarations, not our copies
+
+§§6b–6d each measured a port against a *copy* of its target's interface —
+`psio_types.h` for Psi4, hand-transcribed kinds for OpenMolcas. A copy can
+drift, and one of ours had. Closing that gap found a defect in our own code that
+none of the 181 passing checks had touched.
+
+**Psi4: checked, and it holds.** `make check-psi4` builds the shim with
+`-DPSIO_USE_PSI4_HEADERS`, which includes Psi4's own `libpsio/psio.h` instead of
+our copy, alongside `conformance_psi4.cc` — a translation unit that takes the
+address of every entry point through a pointer whose type comes from *that*
+header. A definition whose signature had drifted would not satisfy the
+declaration and the link would fail. It links: **16 entry points match**, and
+`PSIO_KEYLEN`, `PSIO_PAGELEN` and both open modes are asserted equal to Psi4's.
+The target is skipped when no Psi4 tree is present.
+
+**OpenMolcas: checked, and it did not hold.** `iwp` is `int64` in OpenMolcas's
+default build (`src/system_util/definitions.F90`), and every interface-visible
+argument of `DaFile`, `gxWrRun` and the rest is declared `integer(kind=iwp)`.
+Both our shims declared theirs plain `integer` — `int32` under every compiler
+that matters. A 64-bit-integer OpenMolcas would have passed `int64` actuals into
+`int32` dummies and been wrong from the first call.
+
+**And nothing would have caught it.** This is the part worth keeping. The Psi4
+mismatch is impossible to ship, because C++ has declarations and the linker
+checks them — that is what §6e's conformance build exploits. Fortran's
+`DaFile` family are *external* subroutines with no explicit interface anywhere,
+so the same class of error compiles cleanly on every compiler and produces
+garbage at run time. Our own test proved it: after the dummies were widened, the
+test still passed literal `1` and `4096` as default integers, gfortran said
+nothing, and `iOpt` arrived as noise. **In a language without interfaces the kind
+has to be right by construction, because there is no later stage that will
+object.**
+
+Both shims now take `iwp` from `port/openmolcas/molcas_kinds.F90` — which in
+OpenMolcas is deleted in favour of `use Definitions` — and the Fortran binding
+in `fortran/libspill.F90` carries explicit C-matching kinds on every dummy, so
+no consumer's default integer width can silently disagree with the ABI.
+
+The regression test is a disk address of 3×10⁹, above 2³¹: it round-trips
+through `dDaFile` only if the whole interface is 64-bit. It failed first time
+and found a *second* instance of the same bug, a bare `int()` in the shim's
+dummy-write path returning default integer and truncating the cursor.
+
+**What this does not do.** It checks that the shims match the declarations. It
+still does not build them inside either code or run either test suite, which
+remains the step that turns §§6b–6d into evidence for criterion 1.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

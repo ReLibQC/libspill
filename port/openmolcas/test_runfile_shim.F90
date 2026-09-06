@@ -3,11 +3,14 @@
 ! record type.
 program test_runfile_shim
   use, intrinsic :: iso_c_binding
+  use molcas_kinds, only: iwp
   use runfile_ls, only: TypDbl, TypInt, TypStr, TypUnk, rcOK, rcNotFound
   implicit none
 
   integer :: ntest = 0, nfail = 0
-  integer :: iRc, n, typ, i
+  ! OpenMolcas's kind, for the same reason as in the DaFile test.
+  integer(iwp) :: iRc, n, typ
+  integer :: i
   real(c_double), target :: d(1024), dback(1024)
   integer(c_int64_t), target :: iv(256), iback(256)
   character(len=32) :: cs, csback
@@ -26,11 +29,11 @@ program test_runfile_shim
   end do
 
   ! ---- the dominant idiom: a labelled double array ----
-  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*1024), 1024, 0, TypDbl)
+  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*1024), 1024_iwp, 0_iwp, TypDbl)
   call check(iRc == rcOK, 'gxWrRun a double array')
 
   dback = 0.0d0
-  call rd_dbl('Last orbitals   ', dback, 1024, iRc)
+  call rd_dbl('Last orbitals   ', dback, 1024_iwp, iRc)
   call check(iRc == rcOK, 'gxRdRun it back')
   good = .true.
   do i = 1, 1024
@@ -39,11 +42,11 @@ program test_runfile_shim
   call check(good, '  ... byte-exact')
 
   ! ---- the query RunFile scans 1024 entries to answer ----
-  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0)
+  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0_iwp)
   call check(iRc == rcOK .and. n == 1024 .and. typ == TypDbl, &
              'ffxRun reports the item count and the type')
 
-  call ffxRun(iRc, 'Never written   ', n, typ, 0)
+  call ffxRun(iRc, 'Never written   ', n, typ, 0_iwp)
   call check(iRc == rcNotFound .and. n == 0 .and. typ == TypUnk, &
              'ffxRun on an absent label is rcNotFound')
 
@@ -51,10 +54,10 @@ program test_runfile_shim
   do i = 1, 256
     iv(i) = int(7 * i, c_int64_t)
   end do
-  call gxWrRun(iRc, 'nSym            ', transfer(iv, ' ', 8*256), 256, 0, TypInt)
+  call gxWrRun(iRc, 'nSym            ', transfer(iv, ' ', 8*256), 256_iwp, 0_iwp, TypInt)
   call check(iRc == rcOK, 'gxWrRun an integer array')
   iback = 0
-  call rd_int('nSym            ', iback, 256, iRc)
+  call rd_int('nSym            ', iback, 256_iwp, iRc)
   good = .true.
   do i = 1, 256
     if (iback(i) /= iv(i)) good = .false.
@@ -62,37 +65,37 @@ program test_runfile_shim
   call check(iRc == rcOK .and. good, 'gxRdRun the integers back')
 
   cs = 'SEWARD                          '
-  call gxWrRun(iRc, 'Seward Title    ', transfer(cs, ' ', 32), 32, 0, TypStr)
+  call gxWrRun(iRc, 'Seward Title    ', transfer(cs, ' ', 32), 32_iwp, 0_iwp, TypStr)
   csback = ' '
-  call rd_str('Seward Title    ', csback, 32, iRc)
+  call rd_str('Seward Title    ', csback, 32_iwp, iRc)
   call check(iRc == rcOK .and. csback == cs, 'a character record round-trips')
 
   ! ---- trailing blanks: RunFile compares the full 16-character field, so
   !      these must be the same record here too ----
-  call ffxRun(iRc, 'nSym', n, typ, 0)
+  call ffxRun(iRc, 'nSym', n, typ, 0_iwp)
   call check(iRc == rcOK .and. n == 256, 'a label differing only in trailing blanks is the same record')
 
   ! ---- growth past the previous size: the case that abandons space in
   !      RunFile, because Next only ever advances ----
-  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*1024), 1024, 0, TypDbl)
+  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*1024), 1024_iwp, 0_iwp, TypDbl)
   call check(iRc == rcOK, 'rewrite at the same size')
-  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*64), 64, 0, TypDbl)
-  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0)
+  call gxWrRun(iRc, 'Last orbitals   ', transfer(d, ' ', 8*64), 64_iwp, 0_iwp, TypDbl)
+  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0_iwp)
   call check(n == 64, 'shrinking a record updates its item count')
   dback = 0.0d0
-  call rd_dbl('Last orbitals   ', dback, 64, iRc)
+  call rd_dbl('Last orbitals   ', dback, 64_iwp, iRc)
   call check(iRc == rcOK .and. dback(1) == d(1) .and. dback(64) == d(64), &
              '  ... and it reads back at the new length')
 
   ! ---- a type change: RunFile drops the slot and takes fresh space ----
-  call gxWrRun(iRc, 'Last orbitals   ', transfer(iv, ' ', 8*64), 64, 0, TypInt)
-  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0)
+  call gxWrRun(iRc, 'Last orbitals   ', transfer(iv, ' ', 8*64), 64_iwp, 0_iwp, TypInt)
+  call ffxRun(iRc, 'Last orbitals   ', n, typ, 0_iwp)
   call check(iRc == rcOK .and. typ == TypInt .and. n == 64, &
              'rewriting a label with a different type changes its type')
 
   ! ---- persistence across the close that OpenMolcas does per call ----
   call Fin_Run_Use()
-  call ffxRun(iRc, 'nSym            ', n, typ, 0)
+  call ffxRun(iRc, 'nSym            ', n, typ, 0_iwp)
   call check(iRc == rcOK .and. n == 256 .and. typ == TypInt, &
              'the table of contents survives close and reopen')
 
@@ -107,31 +110,31 @@ contains
   subroutine rd_dbl(lab, buf, nD, rc)
     character(len=*), intent(in) :: lab
     real(c_double), intent(out) :: buf(*)
-    integer, intent(in) :: nD
-    integer, intent(out) :: rc
-    character :: tmp(8*nD)
-    call gxRdRun(rc, lab, tmp, nD, 0, TypDbl)
+    integer(iwp), intent(in) :: nD
+    integer(iwp), intent(out) :: rc
+    character :: tmp(int(8*nD))
+    call gxRdRun(rc, lab, tmp, nD, 0_iwp, TypDbl)
     buf(1:nD) = transfer(tmp, buf(1:nD))
   end subroutine rd_dbl
 
   subroutine rd_int(lab, buf, nD, rc)
     character(len=*), intent(in) :: lab
     integer(c_int64_t), intent(out) :: buf(*)
-    integer, intent(in) :: nD
-    integer, intent(out) :: rc
-    character :: tmp(8*nD)
-    call gxRdRun(rc, lab, tmp, nD, 0, TypInt)
+    integer(iwp), intent(in) :: nD
+    integer(iwp), intent(out) :: rc
+    character :: tmp(int(8*nD))
+    call gxRdRun(rc, lab, tmp, nD, 0_iwp, TypInt)
     buf(1:nD) = transfer(tmp, buf(1:nD))
   end subroutine rd_int
 
   subroutine rd_str(lab, buf, nD, rc)
     character(len=*), intent(in) :: lab
     character(len=*), intent(out) :: buf
-    integer, intent(in) :: nD
-    integer, intent(out) :: rc
-    character :: tmp(nD)
+    integer(iwp), intent(in) :: nD
+    integer(iwp), intent(out) :: rc
+    character :: tmp(int(nD))
     integer :: j
-    call gxRdRun(rc, lab, tmp, nD, 0, TypStr)
+    call gxRdRun(rc, lab, tmp, nD, 0_iwp, TypStr)
     buf = ' '
     do j = 1, nD
       buf(j:j) = tmp(j)
@@ -154,7 +157,8 @@ contains
   ! figure below is a lower bound on what RunFile actually wastes.
   subroutine space_test()
     integer, parameter :: NLAB = 8, NCYC = 24
-    integer :: sizes(NLAB), maxlen(NLAB), c, k, nsz
+    integer :: c, k
+    integer(iwp) :: sizes(NLAB), maxlen(NLAB), nsz
     integer(c_int64_t) :: runfile_next, fsz, live
     character(len=16) :: lab
     real(c_double), target :: buf(4096)
@@ -170,7 +174,7 @@ contains
       do k = 1, NLAB
         nsz = 256 + mod(c * 37 + k * 101, 3500)
         write(lab, '(a,i2.2)') 'GrowArray     ', k
-        call gxWrRun(iRc, lab, transfer(buf, ' ', 8*nsz), nsz, 0, TypDbl)
+        call gxWrRun(iRc, lab, transfer(buf, ' ', int(8*nsz)), nsz, 0_iwp, TypDbl)
         if (iRc /= rcOK) then
           call check(.false., 'space test write')
           return

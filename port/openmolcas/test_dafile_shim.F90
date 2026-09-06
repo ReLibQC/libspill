@@ -3,13 +3,18 @@
 ! add counts to.
 program test_dafile_shim
   use, intrinsic :: iso_c_binding
+  use molcas_kinds, only: iwp
   implicit none
 
-  integer, parameter :: LU_WA = 20, LU_NWA = 21
+  ! Declared with OpenMolcas's own integer kind, because that is what its call
+  ! sites pass. A test using the compiler's default integer would not exercise
+  ! the mismatch that kind exists to prevent.
+  integer(iwp), parameter :: LU_WA = 20, LU_NWA = 21
   integer :: ntest = 0, nfail = 0
   real(c_double), target :: a(4096), b(4096)
   integer(c_int32_t), target :: ia(256), ib(256)
-  integer :: iDisk, iDisk0, i
+  integer(iwp) :: iDisk, iDisk0
+  integer :: i
   character(len=256) :: dir
   logical :: good
 
@@ -26,12 +31,12 @@ program test_dafile_shim
   ! ---- word-addressable unit: MBL = 8, so iDisk counts doubles ----
   call DaName_wa(LU_WA, 'molcas_wa')
   iDisk = 0
-  call dDaFile(LU_WA, 1, a, 4096, iDisk)
+  call dDaFile(LU_WA, 1_iwp, a, 4096_iwp, iDisk)
   call check(iDisk == 4096, 'wa: cursor advances one unit per double')
 
   iDisk = 0
   b = 0.0d0
-  call dDaFile(LU_WA, 2, b, 4096, iDisk)
+  call dDaFile(LU_WA, 2_iwp, b, 4096_iwp, iDisk)
   good = .true.
   do i = 1, 4096
     if (b(i) /= a(i)) good = .false.
@@ -40,11 +45,11 @@ program test_dafile_shim
 
   ! a second record appended at the threaded cursor, the dominant idiom
   iDisk0 = iDisk
-  call dDaFile(LU_WA, 1, a, 1024, iDisk)
+  call dDaFile(LU_WA, 1_iwp, a, 1024_iwp, iDisk)
   call check(iDisk == iDisk0 + 1024, 'wa: appending threads the cursor on')
   b = 0.0d0
   iDisk = iDisk0
-  call dDaFile(LU_WA, 2, b, 1024, iDisk)
+  call dDaFile(LU_WA, 2_iwp, b, 1024_iwp, iDisk)
   good = .true.
   do i = 1, 1024
     if (b(i) /= a(i)) good = .false.
@@ -53,44 +58,53 @@ program test_dafile_shim
 
   ! ---- iOpt 0 is a dummy write: cursor only, no I/O ----
   iDisk0 = iDisk
-  call dDaFile(LU_WA, 0, b, 512, iDisk)
+  call dDaFile(LU_WA, 0_iwp, b, 512_iwp, iDisk)
   call check(iDisk == iDisk0 + 512, 'iOpt=0 advances the cursor without writing')
 
   ! ---- iOpt 5 rewinds ----
-  call dDaFile(LU_WA, 5, b, 0, iDisk)
+  call dDaFile(LU_WA, 5_iwp, b, 0_iwp, iDisk)
   call check(iDisk == 0, 'iOpt=5 rewinds the cursor')
 
   ! ---- genuinely asynchronous write and read, which OpenMolcas declares
   !      (iOpt 6 and 7) but implements as ordinary synchronous calls ----
   iDisk = 0
-  call dDaFile(LU_WA, 6, a, 4096, iDisk)
+  call dDaFile(LU_WA, 6_iwp, a, 4096_iwp, iDisk)
   call check(iDisk == 4096, 'iOpt=6 advances the cursor like a write')
   b = 0.0d0
   iDisk = 0
-  call dDaFile(LU_WA, 7, b, 4096, iDisk)      ! drains the write first
+  call dDaFile(LU_WA, 7_iwp, b, 4096_iwp, iDisk)      ! drains the write first
   iDisk = 0
-  call dDaFile(LU_WA, 2, b, 4096, iDisk)      ! drains the read, then reads
+  call dDaFile(LU_WA, 2_iwp, b, 4096_iwp, iDisk)      ! drains the read, then reads
   good = .true.
   do i = 1, 4096
     if (b(i) /= a(i)) good = .false.
   end do
   call check(good, 'asynchronous 6/7 deliver the same bytes as 1/2')
 
+  ! ---- the integer kind itself ----
+  ! DaFile and its family are EXTERNAL subroutines: OpenMolcas gives them no
+  ! explicit interface, so a shim declaring its dummies with the wrong integer
+  ! kind compiles silently everywhere and is wrong at run time. This value does
+  ! not fit in 32 bits, so it truncates if the interface width ever drifts.
+  iDisk = 3000000000_iwp
+  call dDaFile(LU_WA, 0_iwp, b, 0_iwp, iDisk)
+  call check(iDisk == 3000000000_iwp, 'a disk address above 2^31 survives the interface')
+
   call DaClos(LU_WA)
 
   ! ---- non-word-addressable unit: MBL = 512, and the rounding it implies ----
   call DaName(LU_NWA, 'molcas_nwa')
   iDisk = 0
-  call dDaFile(LU_NWA, 1, a, 100, iDisk)
+  call dDaFile(LU_NWA, 1_iwp, a, 100_iwp, iDisk)
   ! 100 doubles = 800 bytes; (800 + 511)/512 = 2 blocks
   call check(iDisk == 2, 'nwa: a partial block rounds the cursor up to 2')
 
-  call dDaFile(LU_NWA, 1, a(101), 100, iDisk)
+  call dDaFile(LU_NWA, 1_iwp, a(101), 100_iwp, iDisk)
   call check(iDisk == 4, 'nwa: the next record starts on a block boundary')
 
   b = 0.0d0
   iDisk = 0
-  call dDaFile(LU_NWA, 2, b, 100, iDisk)
+  call dDaFile(LU_NWA, 2_iwp, b, 100_iwp, iDisk)
   good = .true.
   do i = 1, 100
     if (b(i) /= a(i)) good = .false.
@@ -99,7 +113,7 @@ program test_dafile_shim
 
   b = 0.0d0
   iDisk = 2
-  call dDaFile(LU_NWA, 2, b, 100, iDisk)
+  call dDaFile(LU_NWA, 2_iwp, b, 100_iwp, iDisk)
   good = .true.
   do i = 1, 100
     if (b(i) /= a(100+i)) good = .false.
@@ -111,10 +125,10 @@ program test_dafile_shim
     ia(i) = 7 * i
   end do
   iDisk = 0
-  call iDaFile(LU_NWA, 1, ia, 256, iDisk)
+  call iDaFile(LU_NWA, 1_iwp, ia, 256_iwp, iDisk)
   ib = 0
   iDisk = 0
-  call iDaFile(LU_NWA, 2, ib, 256, iDisk)
+  call iDaFile(LU_NWA, 2_iwp, ib, 256_iwp, iDisk)
   good = .true.
   do i = 1, 256
     if (ib(i) /= ia(i)) good = .false.

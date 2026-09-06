@@ -10,6 +10,7 @@ tests/abi_header_test
 tests/test_posix
 tests/churn_libspill
 tests/test_surveyed
+tests/test_crayio
 bench/ooc_bench
 port/psi4/test_psio_shim
 port/openmolcas/test_dafile_shim

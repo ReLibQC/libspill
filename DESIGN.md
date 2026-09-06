@@ -702,6 +702,25 @@ primary targets.
 4. **`max_file` is a bug class we delete by construction.** A fixed static table
    of 99 or 250 open units with no growth path is why the copies diverged.
 
+**The conformance target now exists** (`tests/crayio_shim.c`, 21 checks).
+`WOPEN`/`WCLOSE`/`GETWA`/`PUTWA` over libspill is 182 lines against 352–496 per
+copy, and §6a's "the shim is a multiply by eight" is literally one function:
+`(addr - 1) * 8`, the 1-based word address becoming a byte offset. Everything
+else is argument validation and the error codes.
+
+The answer to the question it was built to ask -- is §4's API sufficient for the
+word-addressed workload? -- is yes, with nothing added. It uses `ls_open`,
+`ls_close`, `ls_read`, `ls_write` and nothing else; the whole unit is one record,
+because crayio addresses a unit by offset alone and has no notion of a key. The
+error mapping is closer than expected: crayio's `-5` (the read would run past the
+end of the file) is exactly `LS_ERR_RANGE`, and its `-1` for an unopened unit
+needs no equivalent because the shim's unit table is dynamic.
+
+Which is the other thing the shim demonstrates. Every copy carries a fixed
+`max_file` — 99, or 250 in LSDalton after someone hit it — and the test opens
+unit 4096 to show there is no table left to outgrow. §6a calls that a bug class
+deleted by construction; here it is deleted.
+
 **Related prior art: DIRAC's `waio`.** The DIRAC survey calls it "arguably
 *already* the shared library the design effort is looking for", and its two
 stated defects — linear-scan-on-read (`dirac_labsearch`) and no space reclamation

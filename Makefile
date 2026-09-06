@@ -21,7 +21,7 @@ OBJ  := $(SRC:.c=.o)
 LIB  := libspill.a
 
 TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
-         tests/test_surveyed
+         tests/test_surveyed tests/test_crayio
 BENCH := bench/ooc_bench
 
 # Psi4's libpsio reimplemented on libspill. Built here so the port is tested
@@ -45,6 +45,10 @@ $(LIB): $(OBJ)
 
 tests/%: tests/%.c $(LIB)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -o $@ $< $(LIB) $(LDLIBS)
+
+# The crayio conformance target (§6a) is a shim plus its test, not one file.
+tests/test_crayio: tests/test_crayio.c tests/crayio_shim.c tests/crayio_shim.h $(LIB)
+	$(CC) $(CFLAGS) -Itests -o $@ tests/test_crayio.c tests/crayio_shim.c $(LIB) $(LDLIBS)
 
 bench/%: bench/%.c $(LIB)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -o $@ $< $(LIB) $(LDLIBS)

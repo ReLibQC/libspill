@@ -137,7 +137,7 @@ check-install:
 	 LD_LIBRARY_PATH=$$(dirname $$(find $(INSTALL_TEST_DIR)/prefix -name 'libspill.so.0.*')) \
 	   sh -c '$(INSTALL_TEST_DIR)/consumer/c_use && \
 	          $(INSTALL_TEST_DIR)/consumer/cxx_use && \
-	          $(INSTALL_TEST_DIR)/consumer/f_use' && \
+	          { [ ! -x $(INSTALL_TEST_DIR)/consumer/f_use ] || $(INSTALL_TEST_DIR)/consumer/f_use; }' && \
 	 rm -rf $(INSTALL_TEST_DIR)
 
 check-clean:

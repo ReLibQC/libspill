@@ -14,3 +14,4 @@ tests/test_crayio
 bench/ooc_bench
 port/psi4/test_psio_shim
 port/openmolcas/test_dafile_shim
+port/openmolcas/test_runfile_shim

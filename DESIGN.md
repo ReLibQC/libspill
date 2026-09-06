@@ -861,6 +861,74 @@ keyed Label layer) is untouched, nothing has been built inside OpenMolcas, and
 its test suite has not been run. As with §6b: the API fits, which is not the same
 as the port working.
 
+## 6d. RunFile: the port that deletes structure rather than reproducing it
+
+§6c ported OpenMolcas's DaFile layer and left `runfile_util` — the keyed Label
+layer, 6221 lines in 85 files — untouched. `port/openmolcas/runfile_libspill.F90`
+now does the generic core: `gxWrRun`, `gxRdRun` and `ffxRun`, signatures
+unchanged, so the typed wrappers above them (`dWrRun`, `Put_dArray`,
+`Get_iArray`, `qpg_*`) are not edited. 15 checks.
+
+This is a different kind of port from the DaFile one, and the difference is the
+interesting part. There the shim reproduced a mechanism the callers depend on
+(§6c: the media block length is observable, so most of the work was reproducing
+it exactly). Here it removes one. RunFile keeps a fixed table of contents inside
+the file — 1024 entries, each a 16-character Label with a pointer, a length, a
+maximum length and a type. libspill's table of contents already is that, so the
+port is mostly deletion:
+
+| RunFile | on libspill |
+|---|---|
+| `Toc(1024)` of `{Lab, Ptr, Len, MaxLen, Typ}` | keys |
+| `Ptr` into a hand-managed extent | gone; the store places records |
+| `Typ`, `Len` | one 8-byte attribute blob (§3a(3)) |
+| linear scan of all 1024 entries, twice per write | one hash lookup |
+| open + read ToC + write + write ToC + close, per call | one store, held open |
+
+**Four defects the port removes, each read out of the source rather than
+assumed.**
+
+1. **The file never reuses space.** When a record outgrows its `MaxLen`,
+   `gxWrRun` marks the old slot `Empty`, sets `Ptr = NulPtr`, and takes fresh
+   space at `RunHdr%Next` — which only ever advances. There is no free list
+   anywhere in `runfile_util`. Someone has met this: `gxwrrun.F90` still carries
+   a commented-out warning, *"Label=… expands in RUNFILE with size="*, with a
+   commented-out `Abend` beneath it.
+2. **And `MaxLen` decays, which makes (1) worse than it looks.** The slot's
+   capacity is recomputed as `max(NewLen, nData)` where `NewLen` is
+   `Toc(item)%Len`, the previous *length*, not the previous `MaxLen`
+   (`gxwrrun.F90:100`, `:125`). Two consecutive writes at a smaller size make
+   the slot forget capacity it still physically holds, so the next modest growth
+   abandons all of it.
+3. **`nToc = 1024`, fixed**, overflowing into `"Ran out of ToC record in
+   RunFile"` and `Abend()`. The same bug class as crayio's `max_file` (§6a) and
+   DaFile's `MaxFileSize` (§6c) — three fixed tables in one corpus, each a
+   growth path nobody had.
+4. **Both scans are linear with no early exit.** The label lookup keeps
+   assigning after it has matched, and the free-slot search counts down from
+   `nToc` without breaking, so every read and every write pays 1024 iterations
+   whatever the file holds. DIRAC's `waio` has the same defect, which §6a
+   records as one of the two things this library must do better.
+
+**What the free list is worth here.** Eight records rewritten at varying sizes
+over 24 cycles, the pattern `runfile_util` sees constantly:
+
+| | file | ratio to live |
+|---|---|---|
+| RunFile, computed from its own algorithm | 1.72 MiB | **x17.6** |
+| libspill, measured | 0.13 MiB | **x1.37** |
+
+The RunFile figure is a **lower bound**: it models `MaxLen` as never decreasing,
+and defect (2) means the real thing gives up capacity it still owns. It is
+computed from the source rather than measured, because running OpenMolcas is not
+in scope here — which is exactly the caveat §6b and §6c carry, and it applies
+just as much: this demonstrates that the API fits and what it would save, not
+that the port works. That still needs OpenMolcas's own test suite.
+
+For contrast, §7b disqualified HDF5 as a sole backend at x1.4–1.8 under
+varying-size churn. RunFile is an order of magnitude worse than the thing we
+rejected, inside a target code.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,
@@ -1156,6 +1224,7 @@ Still open, and the only one that matters:
 - **Does the Psi4 port survive Psi4's own test suite?** §6a fits the API to
   libpsio without changing a call site, but it has not been built inside Psi4.
   That, not the shim, is what makes criterion 1 falsifiable.
-- **OpenMolcas.** The DaFile layer is done as a shim (§6c) and `runfile_util`,
-  the keyed Label layer above it, is not. Neither port has been built inside its
-  code, which is the step that turns both into evidence for criterion 1.
+- **OpenMolcas.** Both layers now have shims: DaFile (§6c) and the RunFile
+  generic core (§6d). Neither, nor the Psi4 port, has been built inside its own
+  code — which remains the step that turns any of them into evidence for
+  criterion 1 rather than for the API's shape.

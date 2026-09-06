@@ -31,8 +31,9 @@ PORT_TEST := port/psi4/test_psio_shim
 
 # OpenMolcas's DaFile family, over the Fortran binding of §4a. Needs a Fortran
 # compiler; `make check-c` skips it.
-FORT_OBJ  := fortran/libspill.o port/openmolcas/dafile_libspill.o
-FORT_TEST := port/openmolcas/test_dafile_shim
+FORT_OBJ  := fortran/libspill.o port/openmolcas/molcas_stubs.o \
+             port/openmolcas/dafile_libspill.o port/openmolcas/runfile_libspill.o
+FORT_TEST := port/openmolcas/test_dafile_shim port/openmolcas/test_runfile_shim
 DEP   := $(OBJ:.o=.d) $(TESTS:=.d) $(BENCH:=.d)
 
 all: $(LIB)
@@ -59,17 +60,17 @@ $(PORT_TEST): port/psi4/test_psio_shim.cc $(PORT_SRC) $(LIB)
 fortran/libspill.o: fortran/libspill.F90 include/libspill.h
 	$(FC) $(FCFLAGS) -c -o $@ $<
 
-port/openmolcas/dafile_libspill.o: port/openmolcas/dafile_libspill.F90 fortran/libspill.o
+port/openmolcas/%.o: port/openmolcas/%.F90 fortran/libspill.o
 	$(FC) $(FCFLAGS) -c -o $@ $<
 
-$(FORT_TEST): port/openmolcas/test_dafile_shim.F90 $(FORT_OBJ) $(LIB)
+port/openmolcas/test_%_shim: port/openmolcas/test_%_shim.F90 $(FORT_OBJ) $(LIB)
 	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS)
 
 check-c: $(TESTS) $(PORT_TEST)
 	@for t in $(TESTS) $(PORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
 
 check: check-c $(FORT_TEST)
-	@echo "== $(FORT_TEST)"; ./$(FORT_TEST)
+	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
 
 bench: $(BENCH)
 

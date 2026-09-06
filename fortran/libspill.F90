@@ -20,6 +20,7 @@ module libspill
   public :: ls_write_f, ls_read_f, ls_reserve_f
   public :: ls_exists_f, ls_size_f, ls_erase_f
   public :: ls_awrite_f, ls_aread_f, ls_wait_f, ls_test_f
+  public :: ls_append_f, ls_set_attr_f, ls_get_attr_f
   public :: ls_strerror_f
   public :: LS_OK, LS_ERR_NOKEY, LS_ERR_RANGE, LS_ERR_INVAL, LS_ERR_MODE
   public :: LS_ERR_BACKEND, LS_ERR_BUSY, LS_ERR_CORRUPT
@@ -161,6 +162,34 @@ module libspill
       integer(c_int) :: rc
     end function
 
+    function c_append(s, key, n, buf, off) bind(c, name='ls_append') result(rc)
+      import :: c_ptr, c_char, c_int, c_int64_t, c_size_t
+      type(c_ptr), value :: s
+      character(kind=c_char), intent(in) :: key(*)
+      integer(c_size_t), value :: n
+      type(c_ptr), value :: buf
+      integer(c_int64_t), intent(out) :: off
+      integer(c_int) :: rc
+    end function
+
+    function c_set_attr(s, key, blob, n) bind(c, name='ls_set_attr') result(rc)
+      import :: c_ptr, c_char, c_int, c_size_t
+      type(c_ptr), value :: s
+      character(kind=c_char), intent(in) :: key(*)
+      type(c_ptr), value :: blob
+      integer(c_size_t), value :: n
+      integer(c_int) :: rc
+    end function
+
+    function c_get_attr(s, key, blob, n) bind(c, name='ls_get_attr') result(rc)
+      import :: c_ptr, c_char, c_int, c_size_t
+      type(c_ptr), value :: s
+      character(kind=c_char), intent(in) :: key(*)
+      type(c_ptr), value :: blob
+      integer(c_size_t), intent(inout) :: n
+      integer(c_int) :: rc
+    end function
+
     function c_strerror(err, buf, buflen) bind(c, name='ls_strerror') result(p)
       import :: c_ptr, c_char, c_int, c_size_t
       integer(c_int), value :: err
@@ -297,6 +326,37 @@ contains
     rc = int(c_test(req, d))
     done = (d /= 0)
   end function ls_test_f
+
+  function ls_append_f(s, key, nbytes, buf, off) result(rc)
+    type(c_ptr), intent(in) :: s
+    character(len=*), intent(in) :: key
+    integer, intent(in) :: nbytes
+    type(c_ptr), intent(in) :: buf
+    integer(c_int64_t), intent(out) :: off
+    integer :: rc
+    rc = int(c_append(s, cstr(key), int(nbytes, c_size_t), buf, off))
+  end function ls_append_f
+
+  function ls_set_attr_f(s, key, blob, nbytes) result(rc)
+    type(c_ptr), intent(in) :: s
+    character(len=*), intent(in) :: key
+    type(c_ptr), intent(in) :: blob
+    integer, intent(in) :: nbytes
+    integer :: rc
+    rc = int(c_set_attr(s, cstr(key), blob, int(nbytes, c_size_t)))
+  end function ls_set_attr_f
+
+  function ls_get_attr_f(s, key, blob, nbytes) result(rc)
+    type(c_ptr), intent(in) :: s
+    character(len=*), intent(in) :: key
+    type(c_ptr), intent(in) :: blob
+    integer, intent(inout) :: nbytes
+    integer :: rc
+    integer(c_size_t) :: n
+    n = int(nbytes, c_size_t)
+    rc = int(c_get_attr(s, cstr(key), blob, n))
+    nbytes = int(n)
+  end function ls_get_attr_f
 
   function ls_strerror_f(err) result(text)
     integer, intent(in) :: err

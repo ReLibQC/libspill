@@ -2,12 +2,11 @@
 /* Correctness suite for the POSIX backend: the §4b contract, the memory tier,
  * the async layer, and the concurrency §5a promises. */
 #include <errno.h>
-#include <pthread.h>
+#include "thread_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include "libspill.h"
 
@@ -327,7 +326,7 @@ static void *hammer(void *p)
 static void t_concurrent(void)
 {
     ls_store *s = fresh("t_conc", 0);
-    pthread_t th[NTHREAD];
+    ls_test_thread th[NTHREAD];
     struct arg ar[NTHREAD];
     int i, bad = 0;
     char **k = NULL;
@@ -335,10 +334,10 @@ static void t_concurrent(void)
 
     for (i = 0; i < NTHREAD; i++) {
         ar[i].s = s; ar[i].id = i; ar[i].bad = 0;
-        pthread_create(&th[i], NULL, hammer, &ar[i]);
+        ls_test_thread_create(&th[i], hammer, &ar[i]);
     }
     for (i = 0; i < NTHREAD; i++) {
-        pthread_join(th[i], NULL);
+        ls_test_thread_join(th[i]);
         if (ar[i].bad) bad = ar[i].bad;
     }
     ok(!bad, "8 threads x 64 distinct keys: no error, no corruption");
@@ -390,7 +389,7 @@ static void t_persist(void)
         ls_opts_default(&o);
         s = ls_open("t_junk", &o, &err);
         ok(s == NULL && err == LS_ERR_CORRUPT, "a foreign file is refused, not clobbered");
-        unlink(path);
+        remove(path);          /* C89; unlink is POSIX-only */
     }
 }
 

@@ -8,12 +8,22 @@
  * §3a(5) tuple keys      3 codes   -- already answered by string keys; no code
  */
 #include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "thread_compat.h"
+
+/* §3a(1) is a MULTI-PROCESS property, so t_shared below uses a real fork as
+ * the caller's barrier. Windows has no fork, and an equivalent written with
+ * CreateProcess would be re-executing this binary with an argument -- a
+ * different test, not the same one ported. That section is skipped there and
+ * says so; everything else in this file runs everywhere. */
+#ifndef _WIN32
+#define LS_TEST_HAVE_FORK 1
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include "libspill.h"
 
@@ -93,17 +103,17 @@ static void t_append(void)
     /* The reason this is a primitive rather than ls_size plus ls_write: with
      * six threads appending, every offset must still be distinct. */
     {
-        pthread_t th[NAPP_THREAD];
+        ls_test_thread th[NAPP_THREAD];
         struct app ar[NAPP_THREAD];
         uint64_t all[NAPP_THREAD * NAPP_EACH];
         int i, j, k = 0, bad = 0, dup = 0;
 
         for (i = 0; i < NAPP_THREAD; i++) {
             ar[i].s = s; ar[i].id = i; ar[i].bad = 0;
-            pthread_create(&th[i], NULL, appender, &ar[i]);
+            ls_test_thread_create(&th[i], appender, &ar[i]);
         }
         for (i = 0; i < NAPP_THREAD; i++) {
-            pthread_join(th[i], NULL);
+            ls_test_thread_join(th[i]);
             if (ar[i].bad) bad = 1;
             for (j = 0; j < NAPP_EACH; j++) all[k++] = ar[i].off[j];
         }
@@ -216,7 +226,10 @@ static void t_attrs(void)
 #define NPROC 4
 #define NPER  4096
 
-static void t_shared(void)
+/* The multi-process half of §3a(1): several processes writing disjoint ranges
+ * of one shared record. Needs a real barrier, which here is fork. */
+#ifdef LS_TEST_HAVE_FORK
+static void t_shared_procs(void)
 {
     ls_opts o;
     ls_store *s;
@@ -273,8 +286,23 @@ static void t_shared(void)
         free(chk);
         ls_close(s, 0);
     }
+}
+#else
+static void t_shared_procs(void)
+{
+    puts("  [SKIP] the multi-process section needs fork(); not available here");
+}
+#endif
 
-    /* The refusals that keep the layout frozen. */
+/* The rest of §3a(1): the refusals that keep the layout frozen. Portable. */
+static void t_shared(void)
+{
+    ls_opts o;
+    ls_store *s;
+    int err = 0;
+
+    t_shared_procs();
+
     ls_opts_default(&o);
     o.parallel = LS_SHARED;
     o.memory_budget = 1 << 20;

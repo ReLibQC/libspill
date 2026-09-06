@@ -8,6 +8,7 @@
  * disqualifying for a scratch heap. Best-fit with coalescing is the answer;
  * this is the number that says whether it worked.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,9 +21,11 @@
 #define LO     (1 << 14)
 #define HI     (1 << 18)
 
-static unsigned long rs = 1;
-static unsigned long nextr(void) { rs = rs * 6364136223846793005UL + 1442695040888963407UL;
-                                   return (rs >> 33); }
+/* A 64-bit LCG, so it must say so: unsigned long is 32 bits on Windows, where
+ * the constants would truncate and rs >> 33 is undefined. */
+static uint64_t rs = 1;
+static uint64_t nextr(void) { rs = rs * 6364136223846793005ULL + 1442695040888963407ULL;
+                              return (rs >> 33); }
 static size_t pick(void) { return (size_t)(LO + nextr() % (HI - LO)); }
 
 int main(void)

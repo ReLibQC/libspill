@@ -435,6 +435,23 @@ fail:
     return NULL;
 }
 
+int ls_unlink_now(ls_store *s)
+{
+    if (!s) return LS_ERR_INVAL;
+    if (!s->path) return LS_OK;               /* already unlinked */
+    if (unlink(s->path) != 0 && errno != ENOENT) {
+        int rc = -errno;
+        ls_report(s, rc, NULL, 0, 0, "unlink_now");
+        return rc;
+    }
+    /* Dropping the path is what makes ls_close's unlink a no-op, and makes a
+     * second call to this harmless. The fd, and anything mapped through it,
+     * keep the inode alive until the store closes. */
+    free(s->path);
+    s->path = NULL;
+    return LS_OK;
+}
+
 int ls_close(ls_store *s, int keep)
 {
     int rc = LS_OK, first = LS_OK;

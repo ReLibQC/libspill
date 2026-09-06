@@ -78,6 +78,25 @@ the C suite, the C++ layer, the Fortran binding, the Python binding, the four
 port shims, the packaging check, and the Psi4 header-conformance build. It
 skips what is not available (numpy, a Psi4 tree, cmake) rather than failing.
 
+### Fortran builds that do not order module compilation
+
+`use libspill` needs `libspill.mod` to exist before the file that uses it is
+compiled. Most build systems arrange that; some do not. IRPF90, which Quantum
+Package is built with, emits an independent build rule per Fortran source in a
+module directory with **no ordering between them**, so `use libspill` races
+against the rule that produces the `.mod`.
+
+Where that is the case, bind the C ABI directly with `bind(c)` interfaces and
+link `-lspill` alone. Two things to get right if you do:
+
+- **Call `ls_opts_init(o, version)`, not `ls_opts_default`.** The header turns
+  `ls_opts_default` into a macro carrying your compile-time `LS_OPTS_VERSION`;
+  bind the *symbol* and you get the function, which always fills the newest
+  version and will write past a struct mirrored from an older header. Pass the
+  version your mirror matches — 1 is 64 bytes through `log_ctx`, 2 adds
+  `exact_name`.
+- **Check the `ls_opts` mirror field by field** against `offsetof` in C, once.
+
 ## Vendoring
 
 libspill is meant to be embedded, so the namespace is kept narrow deliberately:
@@ -109,7 +128,7 @@ The C header is the ABI and the stable surface. Nothing else is.
 |---|---|---|
 | C | `libspill.h` | the ABI; see §4b of DESIGN.md for the contract |
 | C++ | `libspill.hpp` | header-only, C++20. RAII, spans, exceptions, typed `accumulate` |
-| Fortran | `use libspill` | `ISO_C_BINDING`; every dummy carries an explicit C-matching kind |
+| Fortran | `use libspill` | `ISO_C_BINDING`; every dummy carries an explicit C-matching kind. **If your build does not order Fortran compilation, bind the C ABI instead** — see below |
 | Python | `python/libspill.py` | ctypes over the ABI, NumPy throughout; needs no compiler |
 
 ```cpp

@@ -189,7 +189,15 @@ LS_API /* Fills o with defaults. Call it through the ls_opts_default macro below
 LS_API void ls_opts_init(ls_opts *o, uint32_t version);
 
 /* Retained so binaries compiled before ls_opts_init exists keep working; new
- * code gets the macro. */
+ * code gets the macro.
+ *
+ * WARNING for anyone binding this ABI rather than including this header --
+ * Fortran, ctypes, dlsym, another language's FFI. The macro below is what makes
+ * ls_opts_default safe: it carries YOUR compile-time LS_OPTS_VERSION. Bind the
+ * SYMBOL and you get the function, which always fills the newest version and
+ * will write past a struct you mirrored from an older header. Bind
+ * ls_opts_init and pass the version your mirror matches. Version 1 is 64 bytes
+ * through log_ctx; version 2 adds exact_name. */
 LS_API void ls_opts_default(ls_opts *o);
 #define ls_opts_default(o) ls_opts_init((o), LS_OPTS_VERSION)
 
@@ -213,6 +221,19 @@ LS_API ls_store *ls_open(const char *name, const ls_opts *opts, int *err);
  * keep = 0 unlinks the backing file, which is the usual case for scratch.
  * Returns the first error met while draining, else the error from closing. */
 LS_API int ls_close(ls_store *s, int keep);
+
+/* Unlinks the store's backing file while leaving the store open and usable.
+ *
+ * For anonymous scratch: a mapping or an open descriptor keeps the inode alive,
+ * so the data stays reachable and vanishes when the store closes -- or when the
+ * process dies, which is the point. qp2 does exactly this for its Davidson and
+ * Cholesky work matrices so that a crash leaves nothing behind.
+ *
+ * Without this a caller has to reconstruct the path libspill built and unlink it
+ * itself, which reaches into a layout §4b says is ours. ls_close still runs, and
+ * its own unlink becomes a no-op. Idempotent. */
+LS_API int ls_unlink_now(ls_store *s);
+
 
 /* -------------------------------------------------------------------- data
  * off is a byte offset within the named record; a write past the current end

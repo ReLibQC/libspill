@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "libspill.h"
 
@@ -159,6 +160,40 @@ int main(void)
         ok_rc(ls_close(s, 0), LS_OK, "close unmaps whatever is still mapped");
         free(chunk);
         free(whole);
+    }
+
+    /* ls_unlink_now: anonymous scratch that is gone from the filesystem the
+     * instant it exists, but still usable through the mapping. qp2's Davidson
+     * and Cholesky work matrices are exactly this, so that a crash leaves
+     * nothing behind. */
+    {
+        const char *d = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
+        char path[512];
+        struct stat st;
+        double *q;
+
+        s = open_mapped("m_anon", &err);
+        ok(s != NULL, "open a store for the anonymous-scratch pattern");
+        if (s) {
+            double vals[256];
+            for (i = 0; i < 256; i++) vals[i] = 3.0 + i;
+            ls_write(s, "w", 0, sizeof vals, vals);
+            ok_rc(ls_map(s, "w", &addr, &len), LS_OK, "  ... map it");
+
+            snprintf(path, sizeof path, "%s/m_anon.libspill", d);
+            ok(stat(path, &st) == 0, "  ... the backing file exists");
+            ok_rc(ls_unlink_now(s), LS_OK, "ls_unlink_now");
+            ok(stat(path, &st) != 0, "  ... and the file is gone from the filesystem");
+
+            q = addr;
+            ok(q[0] == 3.0 && q[255] == 258.0, "  ... but the mapping still reads");
+            q[0] = -5.0;
+            ok(q[0] == -5.0, "  ... and still writes");
+
+            ok_rc(ls_unlink_now(s), LS_OK, "a second ls_unlink_now is harmless");
+            ok_rc(ls_close(s, 1), LS_OK, "close with keep=1 on an unlinked store");
+            ok(stat(path, &st) != 0, "  ... leaves nothing behind either way");
+        }
     }
 
     printf("%d checks, %d failed\n", ntest, fails);

@@ -1367,6 +1367,55 @@ so the strongest evidence libspill had — that its API matches a real consumer'
 declarations exactly — now lives in the Psi4 tree rather than here. That is the
 right place for it, but it is a loss to this repository and worth stating.
 
+## 6k. Three things the ports taught that the briefs had wrong
+
+Each porting session found something the brief it was given asserted and should
+not have. Recorded because the pattern matters more than the items: **every one
+was a claim I made from reading rather than from building.**
+
+**"Energies must match to machine precision" is bad advice, and it was in all
+three briefs.** qp2 measured its own reproducibility first: four SCF runs of
+water/cc-pVDZ with the *unmodified* code spread over 2.0e-13, from OpenMP
+reduction order. The libspill runs spread 1.0e-13 and sat entirely inside that.
+A bit-identical criterion would have failed against the code's own baseline. The
+right criterion is **within the code's own run-to-run spread, established by
+running the unmodified code first** — and for anything stochastic (qp2's CIPSI
+PT2) there is no energy comparison to make at all.
+
+The same session noted the trap underneath it: a code path gated on available
+memory, like qp2's `disk_based` Davidson, never runs on a small test case, so
+the test passes without exercising the port. Pick a path that is unconditional —
+theirs was Cholesky.
+
+**A Fortran binding is not always usable, and it is nothing to do with the
+binding.** IRPF90 emits an independent build rule per Fortran source with no
+ordering between them, so `use libspill` races the rule producing the `.mod`.
+Any build system that does not order Fortran compilation has this problem. The
+answer is to bind the C ABI directly — which is what §4a means by the C layer
+existing "for reach", though not a reach anyone had anticipated needing.
+
+That exposed a real hazard in libspill: **`ls_opts_default` is a trap for
+anyone binding the ABI rather than including the header.** The header makes it a
+macro carrying the caller's compile-time version; bind the symbol and you get
+the function, which fills the newest version and writes past a struct mirrored
+from an older header. `ls_opts` grew from 64 to 72 bytes the same afternoon a
+session had verified a 64-byte mirror field by field. `ls_opts_init(o, version)`
+is the answer and is now documented at the declaration.
+
+**A survey is not a call-site list.** The qp2 brief named three `mmap_create`
+sites from the survey; the tree has **seven**, and one the brief named
+(`dav_general.irp.f`) has none at all. It also claimed `mmap.f90` could be
+deleted, when `map_functions.irp.f` and `diagonalization_nonsym_h_dressed.irp.f`
+call the raw `mmap()` out of that module — so the file is modified in place, and
+the honest boundary is libspill for anonymous scratch, the existing POSIX path
+for the named durable EZFIO files §3 excludes anyway.
+
+**`ls_unlink_now` came out of this.** qp2 unlinks its anonymous mappings the
+moment they exist, so a crash leaves nothing behind; the session reproduced that
+by rebuilding libspill's path and unlinking it, which works but reaches into a
+layout §4b says is ours. `ls_unlink_now(s)` drops the file and keeps the store —
+the mapping holds the inode — and makes `ls_close`'s own unlink a no-op.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

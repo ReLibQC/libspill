@@ -1064,6 +1064,43 @@ dummy-write path returning default integer and truncating the cursor.
 still does not build them inside either code or run either test suite, which
 remains the step that turns §§6b–6d into evidence for criterion 1.
 
+## 6f. Packaging, the other adoption blocker
+
+§§6b–6e treat adoption as a question about the API. It is also a question about
+the build, and this repository failed that one until now: a Makefile, no
+`CMakeLists.txt`, no install target, no `find_package`, no `pkg-config`, no
+README. Both lead adopters build with CMake. **A maintainer cannot delete their
+own layer in favour of one they cannot add to their build**, however well the
+API fits, so this is not packaging polish — it is the same criterion as §1's,
+approached from the other end.
+
+Now present: a CMake build that installs headers, a versioned shared library
+with a soname, an exported `libspill::spill` target, `libspill::spill_f` for the
+Fortran module, a `libspill.pc`, and `ctest`.
+
+Two details that are easy to get wrong and would surface only in an adopter's
+build:
+
+- **The Fortran `.mod` is compiler- and version-specific**, so it installs under
+  `include/libspill/<compiler>-<version>/` rather than into the shared include
+  directory, where a second compiler's build would overwrite it.
+- **`_GNU_SOURCE` is `PRIVATE`.** The library needs it for `O_DIRECT`,
+  `fallocate` and `MAP_FIXED`; a consumer of the public header needs none of
+  them, and leaking it through the interface would change the feature-test
+  macros of every file that includes us.
+
+`tests/consumer/` is a project that uses `find_package` and the exported targets
+exactly as Psi4 or OpenMolcas would, in C, C++ and Fortran, and refers to
+nothing in this source tree. `make check-install` builds, installs, and consumes
+in one pass, so a broken export or a missing header fails here rather than in
+someone else's build. `README.md` states the status honestly, including that
+neither success criterion is met.
+
+Still missing, and not ours to choose: a `LICENSE` file. DESIGN.md's opening
+line promises a permissive licence and the repository does not contain one,
+which for a component meant to be vendored is a real blocker rather than an
+oversight.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

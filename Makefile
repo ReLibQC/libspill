@@ -97,6 +97,29 @@ check-python: $(SO)
 	    echo "  skipped: numpy not available"; \
 	 fi
 
+# Packaging: install through CMake, then build a consumer project against the
+# installed package with find_package, in C, C++ and Fortran. Nothing in the
+# consumer refers to this source tree, so a broken export or a missing header
+# fails here rather than in an adopter's build.
+INSTALL_TEST_DIR := $(CURDIR)/.installcheck
+
+check-install:
+	@command -v cmake >/dev/null 2>&1 || { echo "  skipped: no cmake"; exit 0; }; \
+	 rm -rf $(INSTALL_TEST_DIR); \
+	 cmake -S . -B $(INSTALL_TEST_DIR)/build -DLIBSPILL_BUILD_FORTRAN=ON \
+	       -DCMAKE_INSTALL_PREFIX=$(INSTALL_TEST_DIR)/prefix >/dev/null && \
+	 cmake --build $(INSTALL_TEST_DIR)/build -j4 >/dev/null && \
+	 cmake --install $(INSTALL_TEST_DIR)/build >/dev/null && \
+	 cmake -S tests/consumer -B $(INSTALL_TEST_DIR)/consumer \
+	       -Dlibspill_DIR=$$(dirname $$(find $(INSTALL_TEST_DIR)/prefix -name libspillConfig.cmake)) \
+	       >/dev/null && \
+	 cmake --build $(INSTALL_TEST_DIR)/consumer -j4 >/dev/null && \
+	 LD_LIBRARY_PATH=$$(dirname $$(find $(INSTALL_TEST_DIR)/prefix -name 'libspill.so.0.*')) \
+	   sh -c '$(INSTALL_TEST_DIR)/consumer/c_use && \
+	          $(INSTALL_TEST_DIR)/consumer/cxx_use && \
+	          $(INSTALL_TEST_DIR)/consumer/f_use' && \
+	 rm -rf $(INSTALL_TEST_DIR)
+
 check-psi4:
 	@if [ -f "$(PSI4_DIR)/src/psi4/libpsio/psio.h" ]; then \
 	    $(MAKE) --no-print-directory port/psi4/conformance_psi4 && ./port/psi4/conformance_psi4; \
@@ -113,6 +136,7 @@ check-c: $(TESTS) $(PORT_TEST) $(CXX_TEST)
 check: check-c $(FORT_TEST)
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
 	@echo "== python binding"; $(MAKE) --no-print-directory check-python
+	@echo "== install and consume"; $(MAKE) --no-print-directory check-install
 	@echo "== psi4 header conformance"; $(MAKE) --no-print-directory check-psi4
 
 bench: $(BENCH)
@@ -124,4 +148,4 @@ clean:
 
 -include $(DEP)
 
-.PHONY: all check check-c check-psi4 check-python bench clean
+.PHONY: all check check-c check-psi4 check-python check-install bench clean

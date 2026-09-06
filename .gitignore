@@ -19,3 +19,4 @@ port/psi4/conformance_psi4
 port/openmolcas/test_dafile_shim
 port/openmolcas/test_runfile_shim
 python/__pycache__/
+.installcheck/

@@ -49,7 +49,9 @@ PORT_TEST := port/psi4/test_psio_shim
 
 # Conformance against Psi4's OWN headers rather than our copy of its types.
 # Skipped when no Psi4 tree is present; point PSI4_DIR at one to run it.
-PSI4_DIR  ?= /home/work/psi4/psi4
+# No default: a path from one developer's machine has no business in a public
+# repository. Set PSI4_DIR=/path/to/psi4/psi4 to run the conformance build.
+PSI4_DIR  ?=
 
 # The header-only C++ layer of §4a. C++20 for std::span.
 CXX_TEST := tests/test_cxx
@@ -144,14 +146,26 @@ check-install:
 	 rm -rf $(INSTALL_TEST_DIR)
 
 check-psi4:
-	@if [ -f "$(PSI4_DIR)/src/psi4/libpsio/psio.h" ]; then \
+	@if [ -n "$(PSI4_DIR)" ] && [ -f "$(PSI4_DIR)/src/psi4/libpsio/psio.h" ]; then \
 	    $(MAKE) --no-print-directory port/psi4/conformance_psi4 && ./port/psi4/conformance_psi4; \
 	 else \
-	    echo "  skipped: no Psi4 tree at $(PSI4_DIR); set PSI4_DIR=... to run"; \
+	    echo "  skipped: set PSI4_DIR=/path/to/psi4/psi4 to run the conformance build"; \
 	 fi
 
 $(CXX_TEST): tests/test_cxx.cc include/libspill.hpp $(LIB)
 	$(CXX) $(CXXFLAGS) -std=c++20 -o $@ $< $(LIB) $(LDLIBS)
+
+# git add -A has caught a build artefact three times (libspill.a,
+# tests/churn_libscratch, libspill.so). Cheaper to check than to remember.
+check-clean:
+	@bad=$$(git ls-files 2>/dev/null | while read f; do \
+	          [ -f "$$f" ] && file --mime "$$f" 2>/dev/null | grep -q 'charset=binary' && echo "$$f"; \
+	        done); \
+	 if [ -n "$$bad" ]; then echo "  tracked binary files:"; echo "$$bad" | sed 's/^/    /'; exit 1; \
+	 else echo "  no tracked binaries"; fi
+	@if git ls-files 2>/dev/null | xargs grep -l "/hom[e]/" 2>/dev/null | grep -v '^DESIGN.md$$'; then \
+	   echo "  ^ absolute local paths in tracked files"; exit 1; \
+	 else echo "  no absolute local paths outside DESIGN.md"; fi
 
 check-c: $(TESTS) $(PORT_TEST) $(CXX_TEST)
 	@for t in $(TESTS) $(PORT_TEST) $(CXX_TEST); do echo "== $$t"; ./$$t || exit 1; done
@@ -160,6 +174,7 @@ check: check-c $(FORT_TEST)
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
 	@echo "== python binding"; $(MAKE) --no-print-directory check-python
 	@echo "== install and consume"; $(MAKE) --no-print-directory check-install
+	@echo "== repository hygiene"; $(MAKE) --no-print-directory check-clean
 	@echo "== psi4 header conformance"; $(MAKE) --no-print-directory check-psi4
 
 bench: $(BENCH)
@@ -171,4 +186,4 @@ clean:
 
 -include $(DEP)
 
-.PHONY: all check check-c check-psi4 check-python check-install bench clean
+.PHONY: all check check-c check-psi4 check-python check-install check-clean bench clean

@@ -5,6 +5,8 @@
 *.o
 *.d
 *.mod
+*.so
+*.so.*
 
 tests/abi_header_test
 tests/test_posix

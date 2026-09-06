@@ -1280,6 +1280,41 @@ at destroy, and `single_node` is accepted but has no separate effect beyond
 libspill's `TMPDIR` policy. And as with every port here: not built inside qp2,
 its test suite not run.
 
+## 6j. Where the port shims live
+
+§§6b–6i built shims for Psi4, OpenMolcas (twice), qp2 and crayio, and all of
+them accumulated in this repository. That was drift, not design: at its peak
+`port/` held 3185 lines — 19 of 61 tracked files — of *other projects'*
+adaptation layers, in a library whose stated premise is that "the thinness is
+the whole design" (§3).
+
+**A shim belongs in the code it adapts.** It is that code's adaptation layer: it
+should be versioned with it, built by its build system, exercised by its test
+suite, and reviewed by its maintainers — the people whose agreement §1's
+criterion actually requires. Keeping it here also produced a licensing wrinkle
+(`psio_types.h` transcribed Psi4's LGPL-3 declarations into a BSD tree), which
+was a symptom of the same mistake.
+
+So `port/psi4`, `port/openmolcas` and `port/qp2` are gone; the work continues as
+changes to those codes. They remain recoverable from this repository's history,
+which is where anyone picking the thread up should look.
+
+**`compat/crayio` is the one exception, and the reason is specific.** It is not
+an adaptation layer for a code — it is a replacement for a routine that *four*
+codes each carry a private copy of, none of which will adopt it (§6a: Dalton and
+LSDalton are not actively developed, MADNESS's copy is in a 1999 module,
+NWChem's has been untouched since 1995). There is no single upstream to send it
+to. It ships as `libspill_crayio`, a separate library, so linking it is how a
+code opts in.
+
+**What this cost.** All Fortran coverage came from the OpenMolcas and qp2 shims'
+tests, so the binding of §4a was only ever tested through a consumer;
+`tests/test_fortran.F90` now exercises it directly, 24 checks including
+`LS_MAPPED`. And the Psi4 header-conformance build (§6e) travels with its shim,
+so the strongest evidence libspill had — that its API matches a real consumer's
+declarations exactly — now lives in the Psi4 tree rather than here. That is the
+right place for it, but it is a loss to this repository and worth stating.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

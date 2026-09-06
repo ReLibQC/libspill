@@ -88,11 +88,11 @@ set_target_properties(spill PROPERTIES
 # bytes the caller never wrote, and being a Fortran external, nothing in the
 # toolchain will object. See DESIGN.md §6e and §6g.
 if(LIBSPILL_WITH_CRAYIO)
-  add_library(spill_crayio port/crayio/crayio_libspill.c)
+  add_library(spill_crayio compat/crayio/crayio_libspill.c)
   add_library(libspill::spill_crayio ALIAS spill_crayio)
   target_link_libraries(spill_crayio PUBLIC spill)
   target_include_directories(spill_crayio
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/port/crayio>
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/compat/crayio>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   if(LIBSPILL_CRAYIO_I8)
     target_compile_definitions(spill_crayio PUBLIC VAR_INT64)
@@ -101,7 +101,7 @@ if(LIBSPILL_WITH_CRAYIO)
     VERSION   ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     POSITION_INDEPENDENT_CODE ON
-    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/port/crayio/crayio_libspill.h")
+    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/compat/crayio/crayio_libspill.h")
 endif()
 
 # ---------------------------------------------------------- Fortran binding
@@ -191,9 +191,9 @@ if(LIBSPILL_BUILD_TESTS)
     else()
       set(tn test_crayio_i8)
     endif()
-    add_executable(${tn} port/crayio/test_crayio.c port/crayio/crayio_libspill.c)
+    add_executable(${tn} compat/crayio/test_crayio.c compat/crayio/crayio_libspill.c)
     target_link_libraries(${tn} PRIVATE spill)
-    target_include_directories(${tn} PRIVATE port/crayio)
+    target_include_directories(${tn} PRIVATE compat/crayio)
     target_compile_definitions(${tn} PRIVATE _GNU_SOURCE)
     if(w EQUAL 1)
       target_compile_definitions(${tn} PRIVATE VAR_INT64)

@@ -169,16 +169,21 @@ end to end so far (§7f of DESIGN.md):
 
 ## Ports
 
-Four shims, each keeping its target's own signatures so that consumer call sites
-are untouched. All four are tested; none has been built inside its own code.
+libspill does not carry other projects' adaptation layers. A shim that adapts a
+code to libspill belongs in that code -- versioned with it, built by its build
+system, run by its test suite. Work in progress:
 
-| target | what it replaces | call sites changed |
+| code | replaces | status |
 |---|---|---|
-| `port/psi4/` | `libpsio`, 23 files / 2036 lines | 0 of ~1080 |
-| `port/openmolcas/` (DaFile) | `io_util`, 5942 lines | 0 of 2225 |
-| `port/openmolcas/` (RunFile) | `runfile_util` generic core | 0 |
-| `port/crayio/` | `WOPEN`/`GETWA`/`PUTWA`, 4 codes | shipped compatibility layer |
-| `port/qp2/` | `mmap.f90`, 343 lines | 0 — `LS_MAPPED` keeps array syntax |
+| Psi4 | `libpsio`, 23 files / 2036 lines | shim in progress in the Psi4 tree |
+| OpenMolcas | `io_util` DaFile layer, 31 files / 3019 lines | in progress |
+| OpenMolcas | `runfile_util` generic core, 991 lines | in progress |
+| qp2 | `src/utils/mmap.f90`, 343 lines | in progress |
+
+The one exception is `compat/crayio/`, which ships here because it has no
+single upstream: it is one 1980s Cray word-addressable I/O emulation that four
+codes each carry a private copy of (Dalton, LSDalton, MADNESS, NWChem). See
+"The crayio compatibility layer" above.
 
 ## Status
 

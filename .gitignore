@@ -19,15 +19,11 @@ tests/test_posix
 tests/churn_libspill
 tests/test_surveyed
 tests/test_crayio
+tests/test_fortran
 tests/test_crayio_i8
 tests/test_cxx
 tests/test_mapped
 tests/test_hdf5
 bench/ooc_bench
-port/psi4/test_psio_shim
-port/psi4/conformance_psi4
-port/openmolcas/test_dafile_shim
-port/openmolcas/test_runfile_shim
 python/__pycache__/
 .installcheck/
-port/qp2/test_mmap_shim

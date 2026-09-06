@@ -33,6 +33,9 @@ PORT_TEST := port/psi4/test_psio_shim
 # Skipped when no Psi4 tree is present; point PSI4_DIR at one to run it.
 PSI4_DIR  ?= /home/work/psi4/psi4
 
+# The header-only C++ layer of §4a. C++20 for std::span.
+CXX_TEST := tests/test_cxx
+
 # OpenMolcas's DaFile family, over the Fortran binding of §4a. Needs a Fortran
 # compiler; `make check-c` skips it.
 FORT_OBJ  := fortran/libspill.o port/openmolcas/molcas_kinds.o \
@@ -86,8 +89,11 @@ check-psi4:
 	    echo "  skipped: no Psi4 tree at $(PSI4_DIR); set PSI4_DIR=... to run"; \
 	 fi
 
-check-c: $(TESTS) $(PORT_TEST)
-	@for t in $(TESTS) $(PORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
+$(CXX_TEST): tests/test_cxx.cc include/libspill.hpp $(LIB)
+	$(CXX) $(CXXFLAGS) -std=c++20 -o $@ $< $(LIB) $(LDLIBS)
+
+check-c: $(TESTS) $(PORT_TEST) $(CXX_TEST)
+	@for t in $(TESTS) $(PORT_TEST) $(CXX_TEST); do echo "== $$t"; ./$$t || exit 1; done
 
 check: check-c $(FORT_TEST)
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
@@ -97,7 +103,8 @@ bench: $(BENCH)
 
 clean:
 	rm -f $(OBJ) $(DEP) $(LIB) $(TESTS) $(BENCH) $(PORT_TEST) \
-	      $(FORT_OBJ) $(FORT_TEST) fortran/*.mod port/psi4/conformance_psi4
+	      $(FORT_OBJ) $(FORT_TEST) fortran/*.mod port/psi4/conformance_psi4 \
+	      $(CXX_TEST)
 
 -include $(DEP)
 

@@ -261,6 +261,39 @@ typedef struct {
 int ls_readv (ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
 int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
 
+/* ------------------------------------------------------------- accumulate
+ * Read-modify-write: buf is combined into what is stored, by the CALLER'S
+ * arithmetic. Taken from NWChem's TCE, whose add_block sits alongside
+ * get_block/put_block; contraction kernels accumulate partial results into a
+ * target, and without this the caller must read into a temporary, add, and
+ * write back -- three operations, an extra buffer, and no chance for the store
+ * to do it in the memory tier without touching disk at all.
+ *
+ * The reduction is supplied rather than selected by an enum, because knowing
+ * the element type is only necessary if the store does the addition, and having
+ * it do so would break the one invariant everything else here preserves: that
+ * the store moves opaque bytes and never learns what a block is. Size alone
+ * genuinely is not enough -- eight bytes may be a double, an int64 or two
+ * floats -- but the caller already knows, so the caller says.
+ *
+ * Cost is one indirect call per BLOCK, not per element.
+ *
+ * Concurrency is §5a's, unchanged: this is a read-modify-write, and two
+ * concurrent accumulations into the same range would lose one update. That is
+ * the caller's to prevent. The surveyed codes settle it by isolation rather
+ * than locking, and a library that serialised here would be slower than the
+ * layers it replaces while claiming to be faster. */
+typedef void (*ls_reduce)(void *dst, const void *src, size_t nbytes, void *ctx);
+
+int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t nbytes,
+                  const void *buf, ls_reduce op, void *ctx);
+
+/* Supplied reductions for the overwhelmingly common cases, so that callers --
+ * especially Fortran ones -- rarely write their own. ctx is NULL, or a pointer
+ * to a scale factor of the matching type: dst += *alpha * src. */
+void ls_add_f64(void *dst, const void *src, size_t nbytes, void *ctx);
+void ls_add_f32(void *dst, const void *src, size_t nbytes, void *ctx);
+
 /* -------------------------------------------------------------- attributes
  * A bounded opaque blob beside a key, capped at LS_ATTR_MAX and never
  * interpreted. §3a(3): ERKALE, VeloxChem, ChronusQ, yambo and MRChem all want
@@ -281,7 +314,9 @@ int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
  * (new functions, new enum values, new trailing ls_opts members):
  *
  *   ls_map / ls_unmap        LS_MAPPED mode. DESIGN.md 3.
- *   ls_accumulate            with ls_reduce and the supplied ls_add_f64/f32.
+ *   ls_aaccumulate          the asynchronous form; no consumer has asked, and
+ *                           the reduction would run on an I/O thread, which is
+ *                           a contract worth stating before offering.
  *   ls_read_strided,         superseded by ls_readv/ls_writev above: a regular
  *   ls_write_strided         stride is a segment list with a regular offset,
  *                            and the segment list also serves the scatter cases

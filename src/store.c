@@ -666,3 +666,90 @@ int ls_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
     pthread_mutex_unlock(&s->toc_lk);
     return rc;
 }
+
+/* -------------------------------------------------------------- accumulate */
+
+void ls_add_f64(void *dst, const void *src, size_t nbytes, void *ctx)
+{
+    double *d = dst;
+    const double *s = src;
+    size_t i, n = nbytes / sizeof *d;
+    if (ctx) { double a = *(const double *)ctx;
+               for (i = 0; i < n; i++) d[i] += a * s[i]; }
+    else     { for (i = 0; i < n; i++) d[i] += s[i]; }
+}
+
+void ls_add_f32(void *dst, const void *src, size_t nbytes, void *ctx)
+{
+    float *d = dst;
+    const float *s = src;
+    size_t i, n = nbytes / sizeof *d;
+    if (ctx) { float a = *(const float *)ctx;
+               for (i = 0; i < n; i++) d[i] += a * s[i]; }
+    else     { for (i = 0; i < n; i++) d[i] += s[i]; }
+}
+
+int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
+                  const void *buf, ls_reduce op, void *ctx)
+{
+    ls_rec  *r;
+    ls_place pl;
+    int rc = LS_OK;
+
+    if (!s || !ls_key_ok(key) || !op || (n && !buf)) return LS_ERR_INVAL;
+    if (off + n < off) return LS_ERR_RANGE;
+    if (n == 0) return LS_OK;
+
+    pthread_mutex_lock(&s->toc_lk);
+    r = ls_toc_find(s, key);
+    if (s->o.parallel == LS_SHARED && (!r || off + n > r->size)) {
+        pthread_mutex_unlock(&s->toc_lk);
+        ls_report(s, LS_ERR_MODE, key, off, n,
+                  "a shared store's layout is frozen; reserve it before sharing");
+        return LS_ERR_MODE;
+    }
+    if (!r) r = ls_toc_insert(s, key);
+    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    rc = ensure_cap(s, r, off + n);
+    if (rc != LS_OK) {
+        pthread_mutex_unlock(&s->toc_lk);
+        ls_report(s, rc, key, off, n, "reserving space for accumulate");
+        return rc;
+    }
+    if (off + n > r->size) r->size = off + n;
+    if (r->mem) ls_lru_touch(s, r);
+    r->busy++;
+    ls_place_of(r, &pl);
+    pthread_mutex_unlock(&s->toc_lk);
+
+    if (pl.mem) {
+        /* The case §4 exists for: resident, so the reduction runs in place and
+         * disk is never touched. Read-modify-write becomes modify. */
+        op(pl.mem + off, buf, n, ctx);
+    } else {
+        static const size_t CH = 1u << 20;
+        unsigned char *tmp = malloc(n < CH ? n : CH);
+        const unsigned char *in = buf;
+        size_t done = 0;
+        if (!tmp) {
+            rc = -ENOMEM;
+        } else {
+            while (done < n && rc == LS_OK) {
+                size_t k = n - done < CH ? n - done : CH;
+                rc = ls_scatter(s, &pl, off + done, k, tmp, NULL, LS_OP_READ);
+                if (rc != LS_OK) break;
+                op(tmp, in + done, k, ctx);
+                rc = ls_scatter(s, &pl, off + done, k, NULL, tmp, LS_OP_WRITE);
+                done += k;
+            }
+            free(tmp);
+        }
+    }
+
+    pthread_mutex_lock(&s->toc_lk);
+    r->busy--;
+    pthread_mutex_unlock(&s->toc_lk);
+
+    if (rc != LS_OK) ls_report(s, rc, key, off, n, "accumulate");
+    return rc;
+}

@@ -467,6 +467,47 @@ The C entry points remain public and supported — Fortran needs them and ABI
 stability is the point — but no C++ or Python consumer should have to touch
 them.
 
+## 4c. The C++ layer, built — and what building it settled
+
+`include/libspill.hpp` is the header-only layer §4a promises, and
+`tests/test_cxx.cc` checks §4a's own sketch works as written: designated
+initialisers, spans with sizes deduced, exceptions, move-only requests, and the
+typed `accumulate` that was "the point of the exercise". 18 checks, clean under
+memcheck and helgrind.
+
+**`ls_accumulate` had to land first**, since it is what the C++ example is
+built around. It is now in the C core with `ls_add_f64` and `ls_add_f32`, and
+the reduction stays the caller's: a supplied `ls_reduce` rather than a typed
+enum, for the reason §4 already gives — the store never learns what a block is.
+The template picks the reduction from `T`, so a C++ caller never writes one.
+`ls_aaccumulate` remains deferred; nobody has asked, and running a caller's
+reduction on an I/O thread is a contract worth stating before offering.
+
+**§5.2's claim about the memory tier is now measured rather than argued.** With
+a budget covering the record, 100 accumulations touch disk not at all — the file
+stays at its 4096-byte superblock, verified in the test rather than asserted.
+That is the whole reason `accumulate` belongs in the library instead of being a
+caller's read-modify-write: resident, the read and the write both disappear.
+
+Three things the typed layer adds that the C core cannot:
+
+- **`static_assert(is_trivially_copyable_v<T>)`.** The C core moves opaque bytes
+  and must; a typed layer can refuse to store a type whose pointers or vtable
+  would come back as garbage. This is most of what a typed layer is *for*, and
+  §4 is right that it must sit above rather than inside — templating the core
+  would forfeit the Fortran and Python reach.
+- **Requests that wait in their destructor.** §4b made `ls_wait` both the status
+  report and the release, so an unwaited request leaks until the store closes.
+  The move-only `ls::request` closes that hole; the destructor waits and never
+  throws, because a failure there would run during unwinding.
+- **`ls::error::code()`,** which keeps the C code intact rather than flattening
+  it to a message. A caller can still branch on `-ENOSPC`, which §4b keeps
+  meaningful precisely because a full scratch filesystem is routine rather than
+  exceptional.
+
+Still absent from §4a's promises: the Python binding, and `LS_MAPPED`, which the
+Python layer is said to earn the most from.
+
 ## 4b. The ABI contract
 
 §4 sketches the calls; this settles the parts a second implementer would

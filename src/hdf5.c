@@ -44,6 +44,18 @@
 
 #include <hdf5.h>
 
+/* H5Literate2 and H5L_info2_t arrived in HDF5 1.12; 1.10 is still what most
+ * distributions ship, and CI caught this rather than an adopter. H5_VERSION_GE
+ * has been available since 1.8.7, which is older than anything we would build
+ * against. */
+#if H5_VERSION_GE(1, 12, 0)
+typedef H5L_info2_t ls_h5_linfo;
+#  define LS_H5_ITERATE H5Literate2
+#else
+typedef H5L_info_t  ls_h5_linfo;
+#  define LS_H5_ITERATE H5Literate
+#endif
+
 #define H5_ATTR_NAME "libspill_attr"
 
 /* HDF5 prints its own error stack to stderr on every failure. A library that
@@ -359,7 +371,7 @@ int ls_h5_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
 
 struct h5_keylist { char **v; size_t n, cap; int bad; };
 
-static herr_t h5_collect(hid_t g, const char *name, const H5L_info2_t *info, void *op)
+static herr_t h5_collect(hid_t g, const char *name, const ls_h5_linfo *info, void *op)
 {
     struct h5_keylist *kl = op;
     (void)g; (void)info;
@@ -383,7 +395,7 @@ int ls_h5_keys(ls_store *s, char ***keys, size_t *n)
 
     memset(&kl, 0, sizeof kl);
     pthread_mutex_lock(&s->h5_lk);
-    H5Literate2(s->h5_file, H5_INDEX_NAME, H5_ITER_NATIVE, &idx, h5_collect, &kl);
+    LS_H5_ITERATE(s->h5_file, H5_INDEX_NAME, H5_ITER_NATIVE, &idx, h5_collect, &kl);
     pthread_mutex_unlock(&s->h5_lk);
 
     if (kl.bad) {

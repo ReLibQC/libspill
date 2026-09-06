@@ -255,7 +255,7 @@ Recording these sharpens the boundary as much as the additions do.
 | code | asks for | refuse because |
 |---|---|---|
 | FLEUR | its default path "is not file I/O at all" — a distributed in-memory KV over one-sided `MPI_GET`/`MPI_PUT` with shared/exclusive locking | we would have to *be* an MPI RMA abstraction |
-| qp2 | Cholesky and Davidson `W`/`S` matrices — "the survey's one clear negative result" | these are BLAS3 operands, not records |
+| qp2 | Cholesky and Davidson `W`/`S` matrices — "the survey's one clear negative result" | these are BLAS3 operands, not records — **but see §6i: `LS_MAPPED` answers the primitive that survey asked for, and this row now understates what qp2 can hand over** |
 | jdftx | N-dimensional hyperslabs into the BerkeleyGW on-disk format | a named external format is HDF5's job |
 | MADNESS, SIESTA, Conquest | MPI fan-in/fan-out around the store | "only MADNESS's runtime knows" — stays in the caller |
 | DFTB+ | the NEGF cache | it lives inside libNEGF; not DFTB+'s to route |
@@ -1199,6 +1199,64 @@ installed header defines a generic macro; and the crayio layer's un-namespaced
 Verified by vendoring `libspill.a` into a host shared object: it links, it runs,
 and the host exports only its own symbol plus the 28 public ones — or only its
 own, with `-Wl,--exclude-libs,libspill.a`.
+
+## 6i. qp2 — and the negative result that stopped being one
+
+`port/qp2/` reimplements Quantum Package 2's `mmap` wrapper on `LS_MAPPED`,
+with qp2's own signatures, so `w => map_w%d2` and `L(Lset(p),k)` keep working.
+7 checks.
+
+**This contradicts the survey, and the survey was right when it was written.**
+qp2's §7 named its `mmap`-backed Cholesky work matrix and Davidson `W`/`S`
+matrices as *"the survey's one clear negative result"*: they are not records
+being read and written but *"dense linear-algebra operands (BLAS3 `dgemm`
+arguments, random-index element updates) that happen to be too large for RAM"*,
+and a keyed store *"would force these algorithms to be rewritten as explicit
+blocked out-of-core linear algebra — a real, nontrivial rewrite"*.
+
+Then it says what would change its mind:
+
+> If a shared library wants to serve this use case, the primitive it needs to
+> expose is closer to **"give me a large flat memory region backed by scratch
+> storage" (i.e. its own `mmap`-like allocator with byte addressing)**, not a
+> record/key API.
+
+That is a specification, and it is `LS_MAPPED` — added later on the evidence of
+qp2 and RMG (§3), before anyone connected it to this paragraph. `ls_reserve`
+sizes the region, `ls_map` returns one pointer, `c_f_pointer` makes it the array
+qp2 already indexes. The test exercises exactly the two patterns the survey
+says a record API cannot express: random-index element updates, and three mapped
+regions as the operands of one `dgemm`.
+
+**§3a's refusal table is therefore incomplete.** It lists qp2 only under "should
+refuse", quoting the negative result — but the same survey section says
+mechanisms 3 and 4 are *"mostly yes"* for a keyed store and mechanism 1 *"fits
+nearly as well"*. Three of qp2's four scratch mechanisms were always a fit; the
+fourth is now one too.
+
+**What a qp2 port could remove:**
+
+| | raw | note |
+|---|---|---|
+| `src/utils/mmap.f90` | 343 | mechanism 2 — the shim is 165 lines |
+| `src/utils/map_module.f90` | 902 | mechanism 1, the sharded integral map |
+| `src/utils/map_functions.irp.f` | 133 | its save/load, 2 call sites each |
+| `ao_tc_eff_map/map_integrals_eff_pot.irp.f` | 313 | mechanism 4 |
+| ~a dozen ad-hoc `open`+`write(N) array` pairs | ~150 | mechanism 3, no shared helper at all |
+
+**And qp2 is the strongest duplication evidence in the corpus after crayio**,
+because it is *internal*: mechanisms 1 and 4 are, in the survey's words, "the
+same 'persist a sharded integral map' problem solved twice, differently" —
+inside one codebase, not across four. Mechanism 3 is a dozen more
+reimplementations of "open, write whole array, close, flip an EZFIO flag."
+
+**Caveats.** Mechanism 3's tensor dumps are partly restart files, which §3
+excludes as durable output; a port should take the within-run ones and leave the
+rest to EZFIO. Two behavioural differences are recorded in the shim's header:
+qp2 unlinks an anonymous mapping immediately after creating it while we unlink
+at destroy, and `single_node` is accepted but has no separate effect beyond
+libspill's `TMPDIR` policy. And as with every port here: not built inside qp2,
+its test suite not run.
 
 ## 7. Validation plan
 

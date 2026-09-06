@@ -178,6 +178,7 @@ are untouched. All four are tested; none has been built inside its own code.
 | `port/openmolcas/` (DaFile) | `io_util`, 5942 lines | 0 of 2225 |
 | `port/openmolcas/` (RunFile) | `runfile_util` generic core | 0 |
 | `port/crayio/` | `WOPEN`/`GETWA`/`PUTWA`, 4 codes | shipped compatibility layer |
+| `port/qp2/` | `mmap.f90`, 343 lines | 0 — `LS_MAPPED` keeps array syntax |
 
 ## Status
 

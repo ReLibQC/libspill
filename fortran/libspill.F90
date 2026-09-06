@@ -22,6 +22,7 @@ module libspill
   public :: ls_exists_f, ls_size_f, ls_erase_f
   public :: ls_awrite_f, ls_aread_f, ls_wait_f, ls_test_f
   public :: ls_append_f, ls_set_attr_f, ls_get_attr_f
+  public :: ls_map_f, ls_unmap_f
   public :: ls_strerror_f
   public :: LS_OK, LS_ERR_NOKEY, LS_ERR_RANGE, LS_ERR_INVAL, LS_ERR_MODE
   public :: LS_ERR_BACKEND, LS_ERR_BUSY, LS_ERR_CORRUPT
@@ -191,6 +192,22 @@ module libspill
       integer(c_int) :: rc
     end function
 
+    function c_map(s, key, addr, len) bind(c, name='ls_map') result(rc)
+      import :: c_ptr, c_char, c_int, c_size_t
+      type(c_ptr), value :: s
+      character(kind=c_char), intent(in) :: key(*)
+      type(c_ptr), intent(out) :: addr
+      integer(c_size_t), intent(out) :: len
+      integer(c_int) :: rc
+    end function
+
+    function c_unmap(s, key) bind(c, name='ls_unmap') result(rc)
+      import :: c_ptr, c_char, c_int
+      type(c_ptr), value :: s
+      character(kind=c_char), intent(in) :: key(*)
+      integer(c_int) :: rc
+    end function
+
     function c_strerror(err, buf, buflen) bind(c, name='ls_strerror') result(p)
       import :: c_ptr, c_char, c_int, c_size_t
       integer(c_int), value :: err
@@ -354,6 +371,25 @@ contains
     integer(c_int) :: rc
     rc = c_get_attr(s, cstr(key), blob, nbytes)
   end function ls_get_attr_f
+
+  ! Valid only on a store opened with mode = LS_MAPPED. `addr` is what a caller
+  ! hands to c_f_pointer to get an ordinary Fortran array over the mapping --
+  ! which is the whole point of the mode, and what qp2's mmap wrapper does.
+  function ls_map_f(s, key, addr, nbytes) result(rc)
+    type(c_ptr), intent(in) :: s
+    character(len=*), intent(in) :: key
+    type(c_ptr), intent(out) :: addr
+    integer(c_size_t), intent(out) :: nbytes
+    integer(c_int) :: rc
+    rc = c_map(s, cstr(key), addr, nbytes)
+  end function ls_map_f
+
+  function ls_unmap_f(s, key) result(rc)
+    type(c_ptr), intent(in) :: s
+    character(len=*), intent(in) :: key
+    integer(c_int) :: rc
+    rc = c_unmap(s, cstr(key))
+  end function ls_unmap_f
 
   function ls_strerror_f(err) result(text)
     integer(c_int), intent(in) :: err

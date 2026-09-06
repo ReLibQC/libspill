@@ -67,6 +67,16 @@ FORT_OBJ  := fortran/libspill.o port/openmolcas/molcas_kinds.o \
              port/openmolcas/molcas_stubs.o \
              port/openmolcas/dafile_libspill.o port/openmolcas/runfile_libspill.o
 FORT_TEST := port/openmolcas/test_dafile_shim port/openmolcas/test_runfile_shim
+
+# The qp2 mmap shim's test uses dgemm, because the claim it checks is that a
+# mapped region works as a BLAS3 operand. Skipped where BLAS is not present;
+# the library itself needs none.
+BLAS_LIB := $(firstword $(wildcard /usr/lib64/libblas.so /usr/lib/x86_64-linux-gnu/libblas.so \
+                                   /usr/lib64/libopenblas.so /usr/lib/x86_64-linux-gnu/libopenblas.so))
+ifneq ($(BLAS_LIB),)
+FORT_OBJ  += port/qp2/mmap_libspill.o
+FORT_TEST += port/qp2/test_mmap_shim
+endif
 DEP   := $(OBJ:.o=.d) $(TESTS:=.d) $(BENCH:=.d)
 
 all: $(LIB) $(SO)
@@ -113,6 +123,12 @@ port/openmolcas/%.o: port/openmolcas/%.F90 fortran/libspill.o port/openmolcas/mo
 
 port/openmolcas/test_%_shim: port/openmolcas/test_%_shim.F90 $(FORT_OBJ) $(LIB)
 	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS)
+
+port/qp2/%.o: port/qp2/%.F90 fortran/libspill.o
+	$(FC) $(FCFLAGS) -c -o $@ $<
+
+port/qp2/test_mmap_shim: port/qp2/test_mmap_shim.F90 $(FORT_OBJ) $(LIB)
+	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS) -lblas
 
 port/psi4/conformance_psi4: port/psi4/conformance_psi4.cc $(PORT_SRC) $(LIB)
 	$(CXX) $(CXXFLAGS) -DPSIO_USE_PSI4_HEADERS \

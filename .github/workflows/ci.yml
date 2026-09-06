@@ -53,10 +53,13 @@ jobs:
       - name: Install and consume
         run: |
           cmake --install build
+          # Absolute: CMake resolves a relative *_DIR against the build
+          # directory, not the working directory, so `prefix/...` would be
+          # looked for under consumer/ and not found.
           cmake -S tests/consumer -B consumer \
-                -Dlibspill_DIR=$(dirname $(find prefix -name libspillConfig.cmake))
+                -Dlibspill_DIR="$(dirname "$(find "$PWD/prefix" -name libspillConfig.cmake)")"
           cmake --build consumer -j
-          export LD_LIBRARY_PATH=$(dirname $(find prefix -name 'libspill.so.0.*'))
+          export LD_LIBRARY_PATH="$(dirname "$(find "$PWD/prefix" -name 'libspill.so.0.*')")"
           ./consumer/c_use && ./consumer/cxx_use && ./consumer/f_use
 
   # The suite must also pass with every optional piece absent -- that is what a

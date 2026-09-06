@@ -142,6 +142,16 @@ typedef struct {
 void ls_place_of(const ls_rec *r, ls_place *p);          /* toc_lk held */
 int  ls_scatter(ls_store *s, const ls_place *p, uint64_t off, size_t n,
                 void *rbuf, const void *wbuf, int op);
+/* Mapping, only where the platform has it. ls_os_map_extents reserves `total`
+ * bytes and maps each extent over its own slice, so a record that is a list of
+ * extents can still be handed to the caller as one pointer; it returns NULL
+ * with *err set on failure. Declared here rather than in os.h because it speaks
+ * in ls_extent. */
+#ifdef LS_HAVE_MMAP
+void *ls_os_map_extents(int fd, const ls_extent *ext, size_t n, uint64_t total, int *err);
+int   ls_os_unmap(void *addr, size_t len);
+#endif
+
 int  ls_pread_all  (ls_store *s, void *buf, size_t n, uint64_t off);
 int  ls_pwrite_all (ls_store *s, const void *buf, size_t n, uint64_t off);
 

@@ -102,13 +102,13 @@ static char *build_path(const char *name, const ls_opts *o)
     if (!p) return NULL;
 
     if (o->exact_name)
-        snprintf(p, n, "%s/%s", dir, name);
+        snprintf(p, n, "%s" LS_PATH_SEP "%s", dir, name);
     /* LS_SHARED deliberately does NOT fold in the rank: every process must
      * name the same file. */
     else if (o->parallel == LS_PER_RANK)
-        snprintf(p, n, "%s/%s.r%d.libspill", dir, name, resolve_rank(o->rank));
+        snprintf(p, n, "%s" LS_PATH_SEP "%s.r%d.libspill", dir, name, resolve_rank(o->rank));
     else
-        snprintf(p, n, "%s/%s.libspill", dir, name);
+        snprintf(p, n, "%s" LS_PATH_SEP "%s.libspill", dir, name);
     return p;
 }
 

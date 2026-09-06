@@ -5,10 +5,6 @@
 
 #include "internal.h"
 
-#ifdef LS_HAVE_MMAP
-#include <sys/mman.h>
-#endif
-
 int ls_key_ok(const char *key)
 {
     size_t n;
@@ -90,7 +86,7 @@ void ls_rec_free(ls_store *s, ls_rec *r)
 {
     if (!r) return;
 #ifdef LS_HAVE_MMAP
-    if (r->map_addr) munmap(r->map_addr, r->map_len);   /* close unmaps */
+    if (r->map_addr) ls_os_unmap(r->map_addr, r->map_len);   /* close unmaps */
 #endif
     if (r->mem) {
         if (s->resident >= r->mem_cap) s->resident -= (size_t)r->mem_cap;

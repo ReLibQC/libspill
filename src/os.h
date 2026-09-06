@@ -2,9 +2,12 @@
 /* libspill -- the platform floor. Internal; not installed.
  *
  * Everything the library asks of the operating system, in one place: the file
- * primitives, threading, and whether mapping exists at all. POSIX and Win32
- * implement it in os_posix.c and os_win32.c respectively, and nothing else in
- * the library names a system call.
+ * primitives, threading, and mapping. POSIX and Win32 implement it in
+ * os_posix.c and os_win32.c respectively, and nothing else in the library names
+ * a system call -- mapping included, since ls_map's reserve-then-MAP_FIXED
+ * sequence is exactly the kind of thing that would otherwise sit in store.c
+ * with a platform guard around it. The mapping entry points are declared in
+ * internal.h rather than here, because they speak in ls_extent.
  *
  * Two rules the Win32 side has to keep, because breaking either would compile
  * silently and be wrong at run time:
@@ -44,6 +47,15 @@
  * identically either way. */
 #if !defined(_WIN32) && !defined(LS_NO_MMAP)
 #  define LS_HAVE_MMAP 1
+#endif
+
+/* The separator to build a path with. Windows accepts '/' in its file APIs, so
+ * this is tidiness rather than a fix -- but a platform floor that abstracts the
+ * temp directory and then hardcodes the separator is only half a floor. */
+#ifdef _WIN32
+#  define LS_PATH_SEP "\\"
+#else
+#  define LS_PATH_SEP "/"
 #endif
 
 /* ------------------------------------------------------------------- files */

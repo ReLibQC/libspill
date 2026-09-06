@@ -792,10 +792,8 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
  *
  * A record is a list of extents, so it is not contiguous in the file and cannot
  * be handed to one mmap call. It can still be handed to the caller as one
- * pointer: reserve the whole logical span with an anonymous PROT_NONE mapping,
- * then map each extent over its own slice with MAP_FIXED. Extents are
- * LS_ALIGN-aligned and LS_ALIGN-sized, which is what makes this legal, and is
- * a reason that alignment is worth keeping beyond O_DIRECT.
+ * pointer, and how that is done is the platform's business rather than this
+ * file's: ls_os_map_extents.
  *
  * Errors under a mapping arrive as SIGBUS, which §3 says the library documents
  * and does not attempt to hide. It cannot: a fault happens in the caller's
@@ -833,21 +831,7 @@ int ls_map(ls_store *s, const char *key, void **addr, size_t *len)
     r->busy++;
     ls_mutex_unlock(&s->toc_lk);
 
-    base = mmap(NULL, (size_t)total, PROT_NONE,
-                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (base == MAP_FAILED) {
-        rc = -errno;
-    } else {
-        uint64_t at = 0;
-        for (i = 0; i < pl.next && rc == LS_OK; i++) {
-            void *want = base + at;
-            void *got = mmap(want, (size_t)pl.ext[i].len, PROT_READ | PROT_WRITE,
-                             MAP_SHARED | MAP_FIXED, s->fd, (off_t)pl.ext[i].foff);
-            if (got == MAP_FAILED) rc = -errno;
-            at += pl.ext[i].len;
-        }
-        if (rc != LS_OK) { munmap(base, (size_t)total); base = MAP_FAILED; }
-    }
+    base = ls_os_map_extents(s->fd, pl.ext, pl.next, total, &rc);
 
     ls_mutex_lock(&s->toc_lk);
     r->busy--;
@@ -884,7 +868,10 @@ int ls_unmap(ls_store *s, const char *key)
 
     if (!r) return LS_ERR_NOKEY;
     if (!a) return LS_OK;                    /* not mapped: nothing to undo */
-    return munmap(a, n) == 0 ? LS_OK : -errno;
+    {
+        int urc = ls_os_unmap(a, n);
+        return urc == 0 ? LS_OK : urc;
+    }
 }
 #else
 /* No mapping on this platform -- see os.h. ls_open refuses LS_MAPPED, so a

@@ -13,8 +13,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
+#include "internal.h"
 #include "os.h"
 
 int ls_os_open_rw(const char *path, int want_direct, int *got_direct)
@@ -111,6 +113,42 @@ void *ls_os_aligned_alloc(size_t align, size_t n)
 }
 
 void ls_os_aligned_free(void *p) { free(p); }
+
+/* A record is a list of extents, so it is not contiguous in the file and cannot
+ * be handed to one mmap call. It can still be handed to the caller as one
+ * pointer: reserve the whole logical span with an anonymous PROT_NONE mapping,
+ * then map each extent over its own slice with MAP_FIXED. Extents are
+ * LS_ALIGN-aligned and LS_ALIGN-sized, which is what makes this legal, and is a
+ * reason that alignment is worth keeping beyond O_DIRECT. */
+void *ls_os_map_extents(int fd, const ls_extent *ext, size_t n, uint64_t total, int *err)
+{
+    unsigned char *base;
+    uint64_t at = 0;
+    size_t i;
+    int rc = 0;
+
+    base = mmap(NULL, (size_t)total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) { if (err) *err = -errno; return NULL; }
+
+    for (i = 0; i < n && rc == 0; i++) {
+        void *want = base + at;
+        void *got = mmap(want, (size_t)ext[i].len, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_FIXED, fd, (off_t)ext[i].foff);
+        if (got == MAP_FAILED) rc = -errno;
+        at += ext[i].len;
+    }
+    if (rc != 0) {
+        munmap(base, (size_t)total);
+        if (err) *err = rc;
+        return NULL;
+    }
+    return base;
+}
+
+int ls_os_unmap(void *addr, size_t len)
+{
+    return munmap(addr, len) == 0 ? 0 : -errno;
+}
 
 /* ----------------------------------------------------------------- threads */
 

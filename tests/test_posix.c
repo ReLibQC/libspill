@@ -32,12 +32,21 @@ static void ok_rc(int rc, int want, const char *what)
     }
 }
 
+/* Where the stores go. Several checks below stat the file the library created,
+ * so the test and the library must agree on its path -- and the way to agree is
+ * to say it, not for each side to work out the platform's default separately.
+ * That is what broke on Windows: the test resolved TMPDIR then /tmp while the
+ * library asked GetTempPath, and they had only ever agreed by coincidence.
+ * "." is ctest's working directory. */
+#define TEST_DIR "."
+
 static ls_store *fresh(const char *name, size_t budget)
 {
     ls_opts o;
     int err = 0;
     ls_store *s;
     ls_opts_default(&o);
+    o.dir = TEST_DIR;
     o.memory_budget = budget;
     s = ls_open(name, &o, &err);
     if (!s) { printf("  [FAIL] open %s: %d\n", name, err); exit(1); }
@@ -219,7 +228,6 @@ static void t_memory_tier(void)
     double *buf = malloc(N * sizeof *buf), *back = malloc(N * sizeof *back);
     ls_store *s;
     struct stat st;
-    const char *dir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
     char path[512];
     size_t i;
 
@@ -231,7 +239,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read from the memory tier");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "memory tier round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem.libspill", dir);
+    snprintf(path, sizeof path, "%s/t_mem.libspill", TEST_DIR);
     ok(stat(path, &st) == 0 && st.st_size == 4096,
        "nothing was written to disk while under budget");
     ls_close(s, 0);
@@ -243,7 +251,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read a spilled record");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "spilled record round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem2.libspill", dir);
+    snprintf(path, sizeof path, "%s/t_mem2.libspill", TEST_DIR);
     ok(stat(path, &st) == 0 && st.st_size > 4096, "the spill reached disk");
     ls_close(s, 0);
 
@@ -379,14 +387,14 @@ static void t_persist(void)
 
     /* a file that is not one of ours must not be silently truncated */
     {
-        const char *dir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
         char path[512];
         FILE *f;
-        snprintf(path, sizeof path, "%s/t_junk.libspill", dir);
+        snprintf(path, sizeof path, "%s/t_junk.libspill", TEST_DIR);
         f = fopen(path, "wb");
         if (f) { char junk[8192]; memset(junk, 'Z', sizeof junk);
                  fwrite(junk, 1, sizeof junk, f); fclose(f); }
         ls_opts_default(&o);
+        o.dir = TEST_DIR;
         s = ls_open("t_junk", &o, &err);
         ok(s == NULL && err == LS_ERR_CORRUPT, "a foreign file is refused, not clobbered");
         remove(path);          /* C89; unlink is POSIX-only */

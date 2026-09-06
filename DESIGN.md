@@ -1108,6 +1108,55 @@ work. Nothing depends on resolving it, because the file is not used when
 building inside Psi4: `-DPSIO_USE_PSI4_HEADERS` takes them from `psio.h`
 instead, which is also the conformance build of §6e.
 
+## 6g. Shipping the crayio layer — what that does and does not claim
+
+`port/crayio/` is now a shipped, installable compatibility layer rather than a
+test fixture: `-DLIBSPILL_WITH_CRAYIO=ON` builds `libspill_crayio`, installs its
+header, and exports `libspill::spill_crayio`.
+
+**This does not reopen §6a.** That section withdrew crayio as an adoption target
+and the reasons are unchanged: Dalton and LSDalton are not actively developed,
+MADNESS's copy sits in a full-CI module unchanged since 1999, and NWChem's two
+copies have had no substantive change since 1995 while NWChem itself took 665
+commits in two years. *Easy to replace* and *going to be replaced* are different
+claims, and only the first is true here. Shipping the layer removes friction for
+anyone who does want it; it does not create a maintainer who does, and none of
+these four should be counted toward §1's three-to-five.
+
+What shipping buys is smaller and real: a code that wants to drop its 352–496
+line copy can link a library instead of vendoring a file out of somebody's test
+directory, and the API's sufficiency for the word-addressed workload becomes a
+supported claim rather than an internal one.
+
+**It is a separate library, deliberately.** `wopen_`, `wclose_`, `getwa_` and
+`putwa_` are global Fortran symbols. Putting them in `libspill` itself would
+collide with any code that still has its own `crayio.c` — or worse, silently
+interpose one on the other. Linking `libspill_crayio` *is* how a code opts in,
+in place of its own `crayio.o`, and `libspill.so` exports none of those symbols.
+
+**Shipping it surfaced a defect that a test fixture had hidden.** The shim
+typed the Fortran integer as `long` and the header claimed "the shim only ever
+widens it, so either works". That is wrong, and not marginally: every crayio
+argument arrives *by pointer*, so there is no widening anywhere — reading a
+caller's `int32` through an `int64` pointer reads four bytes it never wrote. A
+32-bit-`INTEGER` caller got `ierr = -1` from every call, the unit number
+arriving as garbage. Since `VAR_INT64` is *unset* by default in every copy, the
+broken width was the default one.
+
+This is the same defect, from the same cause, as §6e found in the OpenMolcas
+shims: Fortran externals carry no interface, so nothing in the toolchain
+objects. The type now mirrors each copy's own `#if defined(VAR_INT64)` exactly,
+`LIBSPILL_CRAYIO_I8` selects it, and the test is built and run at **both**
+widths — a check that would have caught it, and which no downstream build could
+have.
+
+**One caveat §6a states and shipping does not remove.** The copies "disagree on
+integer width handling (`IRAT`, `VAR_INT64`, `SYS_AIX`) — the shim has to be
+written per code, not once." What ships is Dalton's semantics, which LSDalton's
+header names as the common ancestor. A NWChem or MADNESS adopter should expect
+to check their own copy's error codes and width macros against this one rather
+than assume.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

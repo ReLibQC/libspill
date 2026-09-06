@@ -115,6 +115,19 @@ A library built without HDF5 still accepts `LS_HDF5` at compile time and refuses
 it at `ls_open` with `LS_ERR_BACKEND`, so no consumer needs conditional
 compilation.
 
+## The crayio compatibility layer
+
+`-DLIBSPILL_WITH_CRAYIO=ON` builds `libspill_crayio`, a drop-in for the 1980s
+Cray word-addressable I/O emulation that four codes still carry a private copy
+of (Dalton, LSDalton, MADNESS, NWChem). It is a **separate** library because
+`wopen_`, `getwa_` and `putwa_` are global Fortran symbols; linking it is how a
+code opts in, in place of its own `crayio.o`.
+
+`-DLIBSPILL_CRAYIO_I8=ON` selects a 64-bit Fortran `INTEGER` and **must match
+the code it joins** — every argument arrives by pointer, so a mismatch reads
+bytes the caller never wrote, and nothing in the toolchain will object. The test
+suite builds it at both widths for exactly that reason.
+
 ## Where the performance comes from
 
 Four things, in expected order of magnitude — and only the second is measured
@@ -139,7 +152,7 @@ are untouched. All four are tested; none has been built inside its own code.
 | `port/psi4/` | `libpsio`, 23 files / 2036 lines | 0 of ~1080 |
 | `port/openmolcas/` (DaFile) | `io_util`, 5942 lines | 0 of 2225 |
 | `port/openmolcas/` (RunFile) | `runfile_util` generic core | 0 |
-| `tests/crayio_shim.c` | `WOPEN`/`GETWA`/`PUTWA`, 4 codes | conformance only |
+| `port/crayio/` | `WOPEN`/`GETWA`/`PUTWA`, 4 codes | shipped compatibility layer |
 
 ## Status
 

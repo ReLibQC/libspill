@@ -33,7 +33,7 @@ LIB  := libspill.a
 SO   := libspill.so
 
 TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
-         tests/test_surveyed tests/test_crayio tests/test_mapped \
+         tests/test_surveyed tests/test_crayio tests/test_crayio_i8 tests/test_mapped \
          tests/test_hdf5
 BENCH := bench/ooc_bench
 
@@ -74,9 +74,15 @@ $(SO): $(SRC) include/libspill.h src/internal.h
 tests/%: tests/%.c $(LIB)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -o $@ $< $(LIB) $(LDLIBS)
 
-# The crayio conformance target (§6a) is a shim plus its test, not one file.
-tests/test_crayio: tests/test_crayio.c tests/crayio_shim.c tests/crayio_shim.h $(LIB)
-	$(CC) $(CFLAGS) -Itests -o $@ tests/test_crayio.c tests/crayio_shim.c $(LIB) $(LDLIBS)
+# The crayio compatibility layer. Built at BOTH Fortran integer widths, because
+# every argument arrives by pointer and a mismatch reads bytes the caller never
+# wrote -- and, being Fortran externals, nothing downstream would catch it.
+CRAYIO_SRC := port/crayio/crayio_libspill.c
+tests/test_crayio: port/crayio/test_crayio.c $(CRAYIO_SRC) port/crayio/crayio_libspill.h $(LIB)
+	$(CC) $(CFLAGS) -Iport/crayio -o $@ port/crayio/test_crayio.c $(CRAYIO_SRC) $(LIB) $(LDLIBS)
+
+tests/test_crayio_i8: port/crayio/test_crayio.c $(CRAYIO_SRC) port/crayio/crayio_libspill.h $(LIB)
+	$(CC) $(CFLAGS) -DVAR_INT64 -Iport/crayio -o $@ port/crayio/test_crayio.c $(CRAYIO_SRC) $(LIB) $(LDLIBS)
 
 bench/%: bench/%.c $(LIB)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -o $@ $< $(LIB) $(LDLIBS)

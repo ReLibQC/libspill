@@ -24,6 +24,8 @@ include(CMakePackageConfigHelpers)
 
 option(LIBSPILL_BUILD_FORTRAN "Build the ISO_C_BINDING Fortran module" OFF)
 option(LIBSPILL_WITH_HDF5     "Build the optional HDF5 backend (§7b)"    OFF)
+option(LIBSPILL_WITH_CRAYIO   "Build the crayio compatibility layer"     OFF)
+option(LIBSPILL_CRAYIO_I8     "crayio layer uses 64-bit Fortran INTEGER" OFF)
 option(LIBSPILL_BUILD_TESTS   "Build the test programs"                OFF)
 option(BUILD_SHARED_LIBS      "Build a shared library"                 ON)
 
@@ -72,6 +74,35 @@ set_target_properties(spill PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/libspill.h;${CMAKE_CURRENT_SOURCE_DIR}/include/libspill.hpp")
 
+# ------------------------------------------------- crayio compatibility layer
+#
+# A SEPARATE library, never part of libspill itself, because wopen_, wclose_,
+# getwa_ and putwa_ are global Fortran symbols: a code that still has its own
+# crayio.c would get a duplicate definition, or worse, silently interpose one on
+# the other. Linking this library is how a code opts in, in place of its own
+# crayio.o.
+#
+# LIBSPILL_CRAYIO_I8 must match the Fortran integer width of the code it joins.
+# Every argument arrives by pointer, so a mismatch is not a widening: it reads
+# bytes the caller never wrote, and being a Fortran external, nothing in the
+# toolchain will object. See DESIGN.md §6e and §6g.
+if(LIBSPILL_WITH_CRAYIO)
+  add_library(spill_crayio port/crayio/crayio_libspill.c)
+  add_library(libspill::spill_crayio ALIAS spill_crayio)
+  target_link_libraries(spill_crayio PUBLIC spill)
+  target_include_directories(spill_crayio
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/port/crayio>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  if(LIBSPILL_CRAYIO_I8)
+    target_compile_definitions(spill_crayio PUBLIC VAR_INT64)
+  endif()
+  set_target_properties(spill_crayio PROPERTIES
+    VERSION   ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+    POSITION_INDEPENDENT_CODE ON
+    PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/port/crayio/crayio_libspill.h")
+endif()
+
 # ---------------------------------------------------------- Fortran binding
 #
 # Optional: a Fortran consumer needs the .mod file, which is compiler- and
@@ -99,6 +130,9 @@ endif()
 set(LIBSPILL_TARGETS spill)
 if(LIBSPILL_BUILD_FORTRAN)
   list(APPEND LIBSPILL_TARGETS spill_f)
+endif()
+if(LIBSPILL_WITH_CRAYIO)
+  list(APPEND LIBSPILL_TARGETS spill_crayio)
 endif()
 
 install(TARGETS ${LIBSPILL_TARGETS}
@@ -148,11 +182,23 @@ if(LIBSPILL_BUILD_TESTS)
     add_test(NAME ${t} COMMAND ${t})
   endforeach()
 
-  add_executable(test_crayio tests/test_crayio.c tests/crayio_shim.c)
-  target_link_libraries(test_crayio PRIVATE spill)
-  target_include_directories(test_crayio PRIVATE tests)
-  target_compile_definitions(test_crayio PRIVATE _GNU_SOURCE)
-  add_test(NAME test_crayio COMMAND test_crayio)
+  # Built at both Fortran integer widths; a mismatch is invisible to the
+  # toolchain, so it has to be caught here.
+  foreach(w 0 1)
+    if(w EQUAL 0)
+      set(tn test_crayio_i4)
+    else()
+      set(tn test_crayio_i8)
+    endif()
+    add_executable(${tn} port/crayio/test_crayio.c port/crayio/crayio_libspill.c)
+    target_link_libraries(${tn} PRIVATE spill)
+    target_include_directories(${tn} PRIVATE port/crayio)
+    target_compile_definitions(${tn} PRIVATE _GNU_SOURCE)
+    if(w EQUAL 1)
+      target_compile_definitions(${tn} PRIVATE VAR_INT64)
+    endif()
+    add_test(NAME ${tn} COMMAND ${tn})
+  endforeach()
 
   enable_language(CXX)
   add_executable(test_cxx tests/test_cxx.cc)

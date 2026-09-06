@@ -35,7 +35,7 @@
 #include <string.h>
 
 #include "libspill.h"
-#include "crayio_shim.h"
+#include "crayio_libspill.h"
 
 /* One store per unit; the whole word-addressed space is one record, because
  * crayio addresses a unit by offset alone and has no notion of a key. */
@@ -92,7 +92,7 @@ void FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
         memcpy(nm, name, k);
         nm[k] = '\0';
     } else {
-        sprintf(nm, "fort.%.2ld", u);                /* crayio's own default */
+        sprintf(nm, "fort.%.2d", (int)u);            /* crayio's own default */
     }
 
     ls_opts_default(&o);

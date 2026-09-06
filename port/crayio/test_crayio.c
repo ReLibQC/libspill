@@ -9,7 +9,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "crayio_shim.h"
+#include "crayio_libspill.h"
+
+#if defined(VAR_INT64)
+#  define CRAY_IS_I8 1
+#else
+#  define CRAY_IS_I8 0
+#endif
 
 static int fails = 0, ntest = 0;
 
@@ -38,7 +44,13 @@ int main(void)
     double out[256], back[256];
     int i, good;
 
-    puts("crayio (WOPEN/WCLOSE/GETWA/PUTWA) over libspill");
+    printf("crayio (WOPEN/WCLOSE/GETWA/PUTWA) over libspill, %d-bit INTEGER\n",
+           (int)(8 * sizeof(CRAY_INT)));
+
+    /* The width must be exactly what the code being replaced uses; §6e's lesson
+     * is that nothing downstream will catch it if it is not. */
+    ok(sizeof(CRAY_INT) == (CRAY_IS_I8 ? 8u : 4u),
+       "CRAY_INT matches the build's Fortran integer width");
 
     for (i = 0; i < 256; i++) out[i] = 1.0 + 0.5 * i;
 

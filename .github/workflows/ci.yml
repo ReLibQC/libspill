@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: BSD-3-Clause
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  # The development driver: C core, C++ layer, Fortran and Python bindings, the
+  # four port shims, packaging, and repository hygiene.
+  make:
+    name: make check (${{ matrix.cc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gfortran libhdf5-dev python3-numpy cmake
+      - name: Build and test
+        env:
+          CC: ${{ matrix.cc }}
+        run: make check
+
+  # The packaged build a consumer would use, including find_package from an
+  # out-of-tree project in C, C++ and Fortran.
+  cmake:
+    name: cmake + ctest + install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gfortran libhdf5-dev cmake
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+                -DLIBSPILL_BUILD_FORTRAN=ON \
+                -DLIBSPILL_BUILD_TESTS=ON \
+                -DLIBSPILL_WITH_HDF5=ON \
+                -DLIBSPILL_WITH_CRAYIO=ON \
+                -DCMAKE_INSTALL_PREFIX=$PWD/prefix
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Install and consume
+        run: |
+          cmake --install build
+          cmake -S tests/consumer -B consumer \
+                -Dlibspill_DIR=$(dirname $(find prefix -name libspillConfig.cmake))
+          cmake --build consumer -j
+          export LD_LIBRARY_PATH=$(dirname $(find prefix -name 'libspill.so.0.*'))
+          ./consumer/c_use && ./consumer/cxx_use && ./consumer/f_use
+
+  # The suite must also pass with every optional piece absent -- that is what a
+  # code taking only the POSIX core would build.
+  minimal:
+    name: no HDF5, no Fortran, no numpy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y cmake
+      - name: Build and test the C core only
+        run: make check-c

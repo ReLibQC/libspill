@@ -27,11 +27,16 @@ SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
 # The optional HDF5 backend (§7b). Enabled when the headers are present; a
 # library built without them still accepts LS_HDF5 at compile time and refuses
 # it at ls_open with LS_ERR_BACKEND.
-HDF5_H := $(firstword $(wildcard /usr/include/hdf5.h /usr/local/include/hdf5.h))
-ifneq ($(HDF5_H),)
+# Debian and Ubuntu put the serial build under a subdirectory with a suffixed
+# library name; everyone else uses the plain paths.
+ifneq ($(wildcard /usr/include/hdf5.h /usr/local/include/hdf5.h),)
 SRC     += src/hdf5.c
 CFLAGS  += -DLIBSPILL_HAVE_HDF5
 LDLIBS  += -lhdf5
+else ifneq ($(wildcard /usr/include/hdf5/serial/hdf5.h),)
+SRC     += src/hdf5.c
+CFLAGS  += -DLIBSPILL_HAVE_HDF5 -I/usr/include/hdf5/serial
+LDLIBS  += -lhdf5_serial
 endif
 OBJ  := $(SRC:.c=.o)
 LIB  := libspill.a

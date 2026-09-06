@@ -17,9 +17,12 @@ The first ports are **Psi4 and OpenMolcas** rather than the technically cheaper
 abacus. For a criterion that is deprecation rather than adoption, a maintainer
 who knows the code outranks a low call-site count.
 
-Evidence base: the 53-code survey in `/home/work/libxcsurvey` — `scan_io.py`
-(dispersion), the scratch-I/O addendum in each `SUBLIBRARY_MANIFEST.md`, and the
-dedicated `SCRATCH_IO_SURVEY.md` per code. Quotations in this document cite those.
+Evidence base: a survey of 53 electronic-structure codes — a mechanical
+dispersion scan (`scan_io.py`), a scratch-I/O addendum per code
+(`SUBLIBRARY_MANIFEST.md`), and a dedicated `SCRATCH_IO_SURVEY.md` for each.
+Every quotation in this document comes from those. **The survey is not published
+yet**, so the citations below cannot currently be followed to their source;
+until it is, treat them as attributed claims rather than checkable ones.
 
 A reusable scratch and out-of-core I/O library for electronic-structure codes.
 C99 core, C/C++/Fortran/Python bindings, BSD-3-Clause.

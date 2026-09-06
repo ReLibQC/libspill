@@ -1,5 +1,7 @@
 # libspill
 
+[![CI](https://github.com/ReLibQC/libspill/actions/workflows/ci.yml/badge.svg)](https://github.com/ReLibQC/libspill/actions/workflows/ci.yml)
+
 Scratch and out-of-core I/O for electronic-structure codes. C99 core, with C++,
 Fortran and Python bindings and no required dependencies beyond pthreads.
 

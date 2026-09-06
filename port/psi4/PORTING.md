@@ -10,21 +10,31 @@ Replace the *implementation* of Psi4's `libpsio` with a shim over
 consumer call site**. `psio.h`, `psio.hpp` and `config.h` stay byte-identical;
 what goes away is the ~2000 lines behind them.
 
-Expected diff: **−2036 / +365 lines inside `libpsio`, 0 changes in the 452 files
-that call it.**
+Expected diff: **−2036 / +642 lines inside `libpsio`, 0 changes in the 452 files
+that call it** — 3511 call sites, of which 2468 go through the `PSIO` class and
+1043 through the free functions.
 
 ## What already exists
 
 `port/psi4/psio_libspill.cc` and `.h` in the libspill repo. Copy both into
-`psi4/src/psi4/libpsio/`. They are tested (14 checks) and — importantly — a
-conformance build already links them against **Psi4's own headers**, so the
-signatures are known to match:
+`psi4/src/psi4/libpsio/`. They implement both halves of libpsio's API — the `PSIO` **class** (which is
+what consumers actually call, 2468 sites) and the free functions (1043), with
+the free layer delegating to the default instance exactly as Psi4's `init.cc`
+does. A conformance build links them against **Psi4's own headers** and runs a
+round trip through the class:
 
 ```sh
 make check-psi4 PSI4_DIR=/path/to/psi4/psi4     # in the libspill tree
 #   [PASS] 16 entry points match Psi4's own declarations
+#   [PASS] 21 PSIO class methods match Psi4's own declarations
+#   [PASS] a PSIO instance round-trips, and instances are independent
 #   [PASS] PSIO_KEYLEN, PSIO_PAGELEN and the open modes are unchanged
 ```
+
+> **History worth knowing (issue #1).** The first version of this shim
+> implemented only the free functions, and the first version of the conformance
+> check only tested free functions — so it reported success while the port could
+> not link. If you extend the shim, extend the harness in the same commit.
 
 **Build the shim with `-DPSIO_USE_PSI4_HEADERS`.** That makes it include Psi4's
 real `psio.h` instead of the copy of Psi4's types it carries for standalone
@@ -117,6 +127,11 @@ Psi4 — just not where you would look first.
 
 ## Things that will need a decision
 
+- **Per-instance state.** The shim keeps each `PSIO` instance's units in a side
+  table keyed on `this`, because `psio.hpp` is unchanged by this port and there
+  is nowhere to put a member. That is correct (Psi4 creates several instances)
+  but costs a map lookup per call. If a maintainer would rather add one opaque
+  member to `psio.hpp`, that is cheaper at runtime and no call site changes.
 - **Scratch path policy.** libspill's `ls_opts.dir` takes a directory;
   PSIOManager already computes one per unit. The shim currently uses a single
   directory set by `psio_set_scratch_dir`. Wiring it to PSIOManager's per-unit

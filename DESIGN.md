@@ -837,11 +837,33 @@ against the Psi4 tree at `a0e6ba5c4`:
 | | |
 |---|---|
 | files outside libpsio that touch psio | 452 |
-| psio call sites in them | ~1080 |
-| **call sites the port changes** | **0** |
+| **class**-method call sites (`psio->`, `psio_->`) | **2468** in 142 files |
+| free-function call sites | 1043 |
+| **call sites the port changes** | **0 of 3511** |
 | libpsio files the shim replaces | 23, **2036 lines** |
-| the shim | **344 lines** |
+| the shim | **642 lines** |
 | libpsio files that stay | 9, 850 lines (PSIOManager, paths, namespaces, error text) |
+
+**Corrected after issue #1.** An earlier version of this table said "~1080 call
+sites" and gave the shim as 344 lines. Both were wrong, and in the same way: the
+count was of *free functions only*, and the shim implemented only free
+functions. Psi4's libpsio is a `PSIO` **class**, and the class is the interface
+consumers use — 2468 call sites against the free layer's 1043. The shim defined
+zero class methods, so following §6b as written produced a link failure, not a
+build. It now implements the class, with the free functions delegating to the
+default instance exactly as Psi4's own `init.cc` does.
+
+**Why the conformance check missed it, which is the more useful lesson.**
+`conformance_psi4.cc` included `psio.h` and took the address of each free
+function. It never included `psio.hpp`, never named `PSIO`, and so validated
+precisely the half of the API the shim happened to implement — and reported
+"16 entry points match" while the port could not link. A harness built from the
+same understanding as the code under test confirms that understanding rather
+than checking it. It now also takes the address of every declared class method
+(forcing materialisation, since `&C::f != nullptr` folds away and emits no
+reference), constructs a `PSIO`, round-trips through it, and asserts that two
+instances do not share unit state — Psi4 creates several with
+`make_shared<PSIO>()`.
 
 Three properties make it mechanical, and each was checked against the tree
 rather than assumed:

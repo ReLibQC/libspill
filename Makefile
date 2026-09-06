@@ -93,7 +93,6 @@ fortran/libspill.o: fortran/libspill.F90 include/libspill.h
 
 tests/test_fortran: tests/test_fortran.F90 $(FORT_OBJ) $(LIB)
 	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS)
-	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS) -lblas
 
 
 $(CXX_TEST): tests/test_cxx.cc include/libspill.hpp $(LIB)

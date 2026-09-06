@@ -72,6 +72,12 @@ int      ls_os_getpid(void);
  * is always correct and merely slower. */
 int      ls_os_zero_range(int fd, uint64_t off, uint64_t len);
 
+/* The directory a store goes in when the caller names none. POSIX reads TMPDIR
+ * and falls back to /tmp; Windows has neither, and its own answer comes from
+ * GetTempPath (TMP, then TEMP, then the user profile). Never returns an empty
+ * string, and never a trailing separator. */
+void     ls_os_tmpdir(char *buf, size_t buflen);
+
 /* Fill buf with the system's text for errnum, always NUL-terminated and always
  * something. This is in the floor because the three implementations disagree
  * about almost everything: glibc's strerror_r returns char* and may not touch

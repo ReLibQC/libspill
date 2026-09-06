@@ -91,11 +91,11 @@ static int resolve_rank(int rank)
 static char *build_path(const char *name, const ls_opts *o)
 {
     const char *dir = o->dir;
+    char tmp[512];
     char *p;
     size_t n;
 
-    if (!dir) dir = getenv("TMPDIR");
-    if (!dir || !*dir) dir = "/tmp";
+    if (!dir || !*dir) { ls_os_tmpdir(tmp, sizeof tmp); dir = tmp; }
 
     n = strlen(dir) + strlen(name) + 64;
     p = malloc(n);

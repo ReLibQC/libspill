@@ -186,6 +186,19 @@ int ls_os_zero_range(int fd, uint64_t off, uint64_t len)
     return -1;
 }
 
+void ls_os_tmpdir(char *buf, size_t buflen)
+{
+    /* GetTempPath is the documented resolution -- TMP, then TEMP, then the
+     * user profile, then the Windows directory -- and it always ends with a
+     * separator, which the caller does not want. */
+    DWORD n;
+    if (buflen == 0) return;
+    n = GetTempPathA((DWORD)buflen, buf);
+    if (n == 0 || n >= buflen) { snprintf(buf, buflen, "."); return; }
+    while (n > 0 && (buf[n - 1] == '\\' || buf[n - 1] == '/')) buf[--n] = '\0';
+    if (n == 0) snprintf(buf, buflen, ".");
+}
+
 void ls_os_strerror(int errnum, char *buf, size_t buflen)
 {
     if (buflen == 0) return;

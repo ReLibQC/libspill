@@ -80,6 +80,14 @@ int ls_os_zero_range(int fd, uint64_t off, uint64_t len)
 #endif
 }
 
+void ls_os_tmpdir(char *buf, size_t buflen)
+{
+    const char *d = getenv("TMPDIR");
+    if (!d || !*d) d = "/tmp";
+    snprintf(buf, buflen, "%s", d);
+    if (buflen) buf[buflen - 1] = '\0';
+}
+
 void ls_os_strerror(int errnum, char *buf, size_t buflen)
 {
     if (buflen == 0) return;

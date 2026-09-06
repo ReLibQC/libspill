@@ -70,6 +70,29 @@ the C suite, the C++ layer, the Fortran binding, the Python binding, the four
 port shims, the packaging check, and the Psi4 header-conformance build. It
 skips what is not available (numpy, a Psi4 tree, cmake) rather than failing.
 
+## Vendoring
+
+libspill is meant to be embedded, so the namespace is kept narrow deliberately:
+
+- **C.** Every public entry point is `ls_`-prefixed and marked `LS_API`; the
+  library is compiled `-fvisibility=hidden`, so the ~34 internal helpers
+  (`ls_rw`, `ls_toc_find`, `ls_pool_start`, …) are not linkable and are not part
+  of the ABI. The static library is built position-independent, so it can go
+  inside your shared object.
+- **Macros.** Public macros are `LS_*` or `LIBSPILL_*`. No installed header
+  defines a generic name.
+- **C++.** The namespace is `libspill`; `ls` is a convenience alias you can turn
+  off with `-DLIBSPILL_NO_SHORT_NAMESPACE`.
+- **Fortran.** Module `libspill`, so symbols mangle to `__libspill_MOD_*`.
+- **crayio.** Deliberately *not* namespaced — `wopen_`, `getwa_` and the rest
+  are the names it exists to provide — which is why it is a separate library you
+  link only in place of your own `crayio.o`. `libspill` itself exports none of
+  them.
+
+To keep even the public symbols internal to your library, link with
+`-Wl,--exclude-libs,libspill.a`; the 28 exported `ls_*` names then do not appear
+in your shared object at all.
+
 ## The four language layers
 
 The C header is the ABI and the stable surface. Nothing else is.

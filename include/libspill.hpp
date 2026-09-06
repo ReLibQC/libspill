@@ -31,7 +31,11 @@ extern "C" {
 #include "libspill.h"
 }
 
-namespace ls {
+/* The primary namespace is `libspill`. `ls` is a two-character name and this is
+ * a header a project vendors, so squatting on it would be rude at best; the
+ * short alias below is provided for convenience and can be turned off with
+ * -DLIBSPILL_NO_SHORT_NAMESPACE if the consuming project already has one. */
+namespace libspill {
 
 // ---------------------------------------------------------------- errors
 
@@ -313,5 +317,10 @@ inline auto as_span(const C &c) { return std::span<const typename C::value_type>
 template <class C>
 inline auto as_mutable_span(C &c) { return std::span<typename C::value_type>(c); }
 
-}  // namespace ls
+}  // namespace libspill
+
+#ifndef LIBSPILL_NO_SHORT_NAMESPACE
+namespace ls = libspill;
+#endif
+
 #endif  // LIBSPILL_HPP

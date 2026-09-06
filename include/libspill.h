@@ -17,6 +17,20 @@
 extern "C" {
 #endif
 
+/* Marks the public entry points. The library is compiled -fvisibility=hidden,
+ * so everything NOT marked here stays out of the dynamic symbol table and out
+ * of a vendoring project's exported namespace. Prefixing internals with ls_ is
+ * not the same as encapsulating them: without this, ls_rw, ls_toc_find,
+ * ls_pool_start and thirty others would be linkable -- and therefore, in
+ * practice, part of the ABI we promised to keep. */
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  define LS_API
+#elif defined(__GNUC__) && (__GNUC__ >= 4)
+#  define LS_API __attribute__((visibility("default")))
+#else
+#  define LS_API
+#endif
+
 /* ------------------------------------------------------------------ version
  * LS_VERSION_NUM is the header's version; ls_version() is the linked
  * library's. A caller that cares about the difference should compare them. */
@@ -26,8 +40,8 @@ extern "C" {
 #define LS_VERSION_NUM   (LS_VERSION_MAJOR * 10000 + LS_VERSION_MINOR * 100 \
                           + LS_VERSION_PATCH)
 
-int         ls_version(void);
-const char *ls_version_string(void);
+LS_API int         ls_version(void);
+LS_API const char *ls_version_string(void);
 
 /* ------------------------------------------------------------------- errors
  * Every entry point returns 0 on success and a negative code on failure. The
@@ -57,7 +71,7 @@ enum {
  * buffer rather than returning a static string so that it is thread-safe for
  * the negated-errno range too, where the text comes from the C library. */
 #define LS_ERRBUF_MIN 128
-const char *ls_strerror(int err, char *buf, size_t buflen);
+LS_API const char *ls_strerror(int err, char *buf, size_t buflen);
 
 /* ------------------------------------------------------------------ options
  * A store is opened once and keeps its backend, mode and parallel policy for
@@ -149,7 +163,7 @@ typedef struct {
  * header keeps working against a newer library. Always obtain an ls_opts from
  * ls_opts_default rather than declaring one and filling it in. */
 
-void ls_opts_default(ls_opts *o);
+LS_API void ls_opts_default(ls_opts *o);
 
 /* --------------------------------------------------------------- lifecycle */
 typedef struct ls_store ls_store;
@@ -158,13 +172,13 @@ typedef struct ls_req   ls_req;
 /* opts may be NULL, meaning ls_opts_default. err may be NULL. Returns NULL on
  * failure with *err set. `name` identifies the store within `dir`; it is not a
  * path, and the library owns the file layout underneath it. */
-ls_store *ls_open(const char *name, const ls_opts *opts, int *err);
+LS_API ls_store *ls_open(const char *name, const ls_opts *opts, int *err);
 
 /* Drains any request still in flight -- as fclose flushes -- then closes. Frees
  * the store even when it returns an error, so the caller must not close twice.
  * keep = 0 unlinks the backing file, which is the usual case for scratch.
  * Returns the first error met while draining, else the error from closing. */
-int ls_close(ls_store *s, int keep);
+LS_API int ls_close(ls_store *s, int keep);
 
 /* -------------------------------------------------------------------- data
  * off is a byte offset within the named record; a write past the current end
@@ -181,9 +195,9 @@ int ls_close(ls_store *s, int keep);
  * shared. Overlapping ranges of one key from two threads are the caller's
  * problem -- the library takes no data lock, because one would make it slower
  * than the layers it replaces while claiming to be faster. */
-int ls_write(ls_store *s, const char *key, uint64_t off, size_t n,
+LS_API int ls_write(ls_store *s, const char *key, uint64_t off, size_t n,
              const void *buf);
-int ls_read (ls_store *s, const char *key, uint64_t off, size_t n,
+LS_API int ls_read (ls_store *s, const char *key, uint64_t off, size_t n,
              void *buf);
 
 /* --------------------------------------------------------- table of contents
@@ -192,23 +206,23 @@ int ls_read (ls_store *s, const char *key, uint64_t off, size_t n,
  * The lock is never held across an I/O operation, so it costs nothing that
  * matters, and without it the distinct-keys guarantee above could not hold --
  * a first write creates a key, which mutates the table. */
-int ls_exists(ls_store *s, const char *key, int *found);
-int ls_size  (ls_store *s, const char *key, uint64_t *nbytes);
-int ls_erase (ls_store *s, const char *key);
+LS_API int ls_exists(ls_store *s, const char *key, int *found);
+LS_API int ls_size  (ls_store *s, const char *key, uint64_t *nbytes);
+LS_API int ls_erase (ls_store *s, const char *key);
 
 /* Preallocates nbytes for `key`, extending or creating it. Two purposes: it
  * moves -ENOSPC to a point where the caller can still do something about it,
  * instead of the middle of a contraction an hour in, and it gives the backend
  * one extent to write into rather than growing the file per record (DESIGN.md
  * 5.4). The contents of newly reserved space are zero. Never shrinks. */
-int ls_reserve(ls_store *s, const char *key, uint64_t nbytes);
+LS_API int ls_reserve(ls_store *s, const char *key, uint64_t nbytes);
 
 /* Snapshot of the keys present at the moment of the call, owned by the caller
  * and released with ls_keys_free. It is a snapshot rather than a view into the
  * store precisely because another thread may create or erase a key; there is
  * no window in which the returned pointers can go stale. */
-int  ls_keys(ls_store *s, char ***keys, size_t *n);
-void ls_keys_free(char **keys, size_t n);
+LS_API int  ls_keys(ls_store *s, char ***keys, size_t *n);
+LS_API void ls_keys_free(char **keys, size_t n);
 
 /* ------------------------------------------------------------------- async
  * The reason the library exists. Available on LS_POSIX only: DESIGN.md 7b
@@ -221,12 +235,12 @@ void ls_keys_free(char **keys, size_t n);
  * ls_wait completes the request, releases it, and returns the operation's
  * status; the handle is dead afterwards. ls_test only reports completion --
  * a request that tests done must still be waited on to be reaped. */
-int ls_awrite(ls_store *s, const char *key, uint64_t off, size_t n,
+LS_API int ls_awrite(ls_store *s, const char *key, uint64_t off, size_t n,
               const void *buf, ls_req **req);
-int ls_aread (ls_store *s, const char *key, uint64_t off, size_t n,
+LS_API int ls_aread (ls_store *s, const char *key, uint64_t off, size_t n,
               void *buf, ls_req **req);
-int ls_wait  (ls_req *req);
-int ls_test  (ls_req *req, int *done);
+LS_API int ls_wait  (ls_req *req);
+LS_API int ls_test  (ls_req *req, int *done);
 
 /* ------------------------------------------------------------------ append
  * Writes at the key's current end and reports where that was. The offset is
@@ -238,7 +252,7 @@ int ls_test  (ls_req *req, int *done);
  * supply an independently-computed offset -- it obtains one from a prior call's
  * output and the callee auto-advances", under all 2200 of its call sites. Also
  * APE's record framing and ABINIT's row-by-row growth. */
-int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
+LS_API int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
               uint64_t *off_out);
 
 /* ------------------------------------------------------------ vectored I/O
@@ -259,8 +273,8 @@ typedef struct {
     void    *buf;        /* read: destination. write: source, not modified */
 } ls_seg;
 
-int ls_readv (ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
-int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
+LS_API int ls_readv (ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
+LS_API int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
 
 /* ---------------------------------------------------------------- mapping
  * Valid only on a store opened LS_MAPPED (§3). On such a store the
@@ -278,8 +292,8 @@ int ls_writev(ls_store *s, const char *key, const ls_seg *segs, size_t nseg);
  * rather than as a return code. The library documents this and does not attempt
  * to hide it. A store closes any mapping it still holds.
  */
-int ls_map  (ls_store *s, const char *key, void **addr, size_t *len);
-int ls_unmap(ls_store *s, const char *key);
+LS_API int ls_map  (ls_store *s, const char *key, void **addr, size_t *len);
+LS_API int ls_unmap(ls_store *s, const char *key);
 
 /* ------------------------------------------------------------- accumulate
  * Read-modify-write: buf is combined into what is stored, by the CALLER'S
@@ -313,14 +327,14 @@ int ls_unmap(ls_store *s, const char *key);
  * layers it replaces while claiming to be faster. */
 typedef void (*ls_reduce)(void *dst, const void *src, size_t nbytes, void *ctx);
 
-int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t nbytes,
+LS_API int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t nbytes,
                   const void *buf, ls_reduce op, void *ctx);
 
 /* Supplied reductions for the overwhelmingly common cases, so that callers --
  * especially Fortran ones -- rarely write their own. ctx is NULL, or a pointer
  * to a scale factor of the matching type: dst += *alpha * src. */
-void ls_add_f64(void *dst, const void *src, size_t nbytes, void *ctx);
-void ls_add_f32(void *dst, const void *src, size_t nbytes, void *ctx);
+LS_API void ls_add_f64(void *dst, const void *src, size_t nbytes, void *ctx);
+LS_API void ls_add_f32(void *dst, const void *src, size_t nbytes, void *ctx);
 
 /* -------------------------------------------------------------- attributes
  * A bounded opaque blob beside a key, capped at LS_ATTR_MAX and never
@@ -335,8 +349,8 @@ void ls_add_f32(void *dst, const void *src, size_t nbytes, void *ctx);
  * ls_get_attr takes *n as the caller's capacity and sets it to the length
  * stored. A short buffer gets LS_ERR_RANGE with *n set to what was needed; a
  * NULL buffer just reports the length. */
-int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n);
-int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
+LS_API int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n);
+LS_API int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
 
 /* Not in this version, and shaped here so that adding them stays ABI-compatible
  * (new functions, new enum values, new trailing ls_opts members):

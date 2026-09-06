@@ -27,17 +27,33 @@ typedef int64_t CRAY_INT;
 typedef int CRAY_INT;
 #endif
 
-/* The Fortran symbol convention the crayio copies use: lower case, one trailing
- * underscore. */
-#define FSYM(a) a##_
+/* Fortran symbol mangling.
+ *
+ * NOT called FSYM. Dalton's DALTON/include/FSYMdef.h and LSDalton's
+ * src/dft/lsdalton_general.h both define a macro of that name, so an installed
+ * header claiming it would collide with the very codes this layer is for.
+ *
+ * And the underscore is not a constant. FSYMdef.h defines `FSYM(a) a` on some
+ * platforms and `FSYM(a) a ## _` on others -- abstracting the mangling is the
+ * macro's whole purpose, so hardcoding one form would emit the wrong symbol
+ * names wherever the other is right. The default below matches gfortran and
+ * Intel on Linux; define LS_CRAY_FSYM yourself, or LIBSPILL_CRAY_NO_UNDERSCORE,
+ * to match a compiler that differs. */
+#ifndef LS_CRAY_FSYM
+#  if defined(LIBSPILL_CRAY_NO_UNDERSCORE)
+#    define LS_CRAY_FSYM(a) a
+#  else
+#    define LS_CRAY_FSYM(a) a##_
+#  endif
+#endif
 
-void FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
+void LS_CRAY_FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
                  const CRAY_INT *blocks, const CRAY_INT *stats, CRAY_INT *ierr);
-void FSYM(wclose)(const CRAY_INT *unit, CRAY_INT *ierr);
-void FSYM(getwa)(const CRAY_INT *unit, double *result, const CRAY_INT *addr,
+void LS_CRAY_FSYM(wclose)(const CRAY_INT *unit, CRAY_INT *ierr);
+void LS_CRAY_FSYM(getwa)(const CRAY_INT *unit, double *result, const CRAY_INT *addr,
                  const CRAY_INT *count, CRAY_INT *ierr);
-void FSYM(putwa)(const CRAY_INT *unit, const double *source, const CRAY_INT *addr,
+void LS_CRAY_FSYM(putwa)(const CRAY_INT *unit, const double *source, const CRAY_INT *addr,
                  const CRAY_INT *count, CRAY_INT *ierr);
 
-void cray_shim_reset(void);   /* test-only teardown */
+void ls_crayio_reset(void);   /* test-only teardown; not part of crayio */
 #endif

@@ -71,7 +71,7 @@ static cray_unit *unit_open(long unit)
     return &units[unit];
 }
 
-void FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
+void LS_CRAY_FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
                  const CRAY_INT *blocks, const CRAY_INT *stats, CRAY_INT *ierr)
 {
     char nm[256];
@@ -101,7 +101,7 @@ void FSYM(wopen)(const CRAY_INT *unit, const char *name, const CRAY_INT *lennam,
     units[u].open = 1;
 }
 
-void FSYM(wclose)(const CRAY_INT *unit, CRAY_INT *ierr)
+void LS_CRAY_FSYM(wclose)(const CRAY_INT *unit, CRAY_INT *ierr)
 {
     cray_unit *cu = unit_open((long)*unit);
     if (!cu) { *ierr = -1; return; }
@@ -115,7 +115,7 @@ void FSYM(wclose)(const CRAY_INT *unit, CRAY_INT *ierr)
  * shim "a multiply by eight": a 1-based word address becomes a byte offset. */
 static uint64_t byte_off(CRAY_INT addr) { return (uint64_t)(addr - 1) * 8u; }
 
-void FSYM(getwa)(const CRAY_INT *unit, double *result, const CRAY_INT *addr,
+void LS_CRAY_FSYM(getwa)(const CRAY_INT *unit, double *result, const CRAY_INT *addr,
                  const CRAY_INT *count, CRAY_INT *ierr)
 {
     cray_unit *cu = unit_open((long)*unit);
@@ -136,7 +136,7 @@ void FSYM(getwa)(const CRAY_INT *unit, double *result, const CRAY_INT *addr,
     else                                          *ierr = 0;
 }
 
-void FSYM(putwa)(const CRAY_INT *unit, const double *source, const CRAY_INT *addr,
+void LS_CRAY_FSYM(putwa)(const CRAY_INT *unit, const double *source, const CRAY_INT *addr,
                  const CRAY_INT *count, CRAY_INT *ierr)
 {
     cray_unit *cu = unit_open((long)*unit);
@@ -151,7 +151,7 @@ void FSYM(putwa)(const CRAY_INT *unit, const double *source, const CRAY_INT *add
     *ierr = (rc == LS_OK) ? 0 : -6;
 }
 
-void cray_shim_reset(void)
+void ls_crayio_reset(void)
 {
     size_t i;
     for (i = 0; i < nunits; i++)

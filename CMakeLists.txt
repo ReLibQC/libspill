@@ -70,7 +70,8 @@ target_link_libraries(spill PUBLIC Threads::Threads)
 set_target_properties(spill PROPERTIES
   VERSION   ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR}
-  C_VISIBILITY_PRESET default
+  C_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
   POSITION_INDEPENDENT_CODE ON
   PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/libspill.h;${CMAKE_CURRENT_SOURCE_DIR}/include/libspill.hpp")
 

@@ -1157,6 +1157,46 @@ header names as the common ancestor. A NWChem or MADNESS adopter should expect
 to check their own copy's error codes and width macros against this one rather
 than assume.
 
+## 6h. Namespace hygiene for vendoring
+
+These codes vendor. The audit and what it found:
+
+**Symbols were prefixed but not encapsulated.** All 62 globals began with `ls_`,
+which sounds fine until you separate them: 28 are the public API and **34 were
+internal** — `ls_rw`, `ls_scatter`, `ls_toc_find`, `ls_pool_start`, the whole
+allocator, every `ls_h5_*`. Exported, they are linkable, and anything linkable
+is in practice part of the ABI we promised to keep. Public entry points now
+carry `LS_API` and the library is built `-fvisibility=hidden`; the dynamic
+symbol table is exactly the 28.
+
+**The static library was not position-independent** in the Makefile build, so a
+project could not vendor it into its own shared object at all — the link failed
+outright with a relocation error. CMake had `POSITION_INDEPENDENT_CODE` and the
+Makefile did not; they agree now.
+
+**`FSYM` was the worst of it, and not only as a collision.** The crayio header
+defined `FSYM(a) a##_` — and Dalton's `DALTON/include/FSYMdef.h` and LSDalton's
+`src/dft/lsdalton_general.h` each define a macro of that name, so an installed
+header claiming it would collide with the very codes the layer is for. Worse,
+`FSYMdef.h` defines it as `a` on some platforms and `a ## _` on others:
+abstracting the mangling is the macro's entire purpose, so hardcoding the
+underscore would emit the wrong symbol names wherever the other form is right.
+It is now `LS_CRAY_FSYM`, overridable, with `LIBSPILL_CRAY_NO_UNDERSCORE` for
+the other convention.
+
+**The C++ namespace was `ls`.** Two characters, in a header meant to be
+vendored. The primary namespace is `libspill` now, with `ls` as an alias that
+`-DLIBSPILL_NO_SHORT_NAMESPACE` removes.
+
+What was already right: Fortran module symbols mangle to `__libspill_MOD_*`; no
+installed header defines a generic macro; and the crayio layer's un-namespaced
+`wopen_`/`getwa_` are deliberate and quarantined in a separate library
+(§6g).
+
+Verified by vendoring `libspill.a` into a host shared object: it links, it runs,
+and the host exports only its own symbol plus the 28 public ones — or only its
+own, with `-Wl,--exclude-libs,libspill.a`.
+
 ## 7. Validation plan
 
 - Correctness: byte-exact round-trip against each adopter's existing layer,

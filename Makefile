@@ -11,6 +11,11 @@ endif
 CFLAGS  ?= -O2 -g
 CXXFLAGS ?= -O2 -g
 CFLAGS  += -std=c99 -D_GNU_SOURCE -Wall -Wextra -pedantic -Iinclude
+# -fvisibility=hidden keeps the ~34 internal ls_* helpers out of a consumer's
+# exported namespace; -fPIC lets the static library be vendored INTO someone
+# else's shared object, which is how these codes would take it. CMake sets
+# POSITION_INDEPENDENT_CODE for the same reason.
+CFLAGS  += -fvisibility=hidden -fPIC
 CXXFLAGS += -std=c++17 -Wall -Wextra -Iinclude -Iport/psi4
 FCFLAGS  ?= -O2 -g
 FCFLAGS  += -std=f2008 -Wall -Jfortran -Ifortran

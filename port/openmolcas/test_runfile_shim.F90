@@ -134,7 +134,7 @@ contains
     integer(iwp), intent(in) :: nD
     integer(iwp), intent(out) :: rc
     character :: tmp(int(nD))
-    integer :: j
+    integer(iwp) :: j
     call gxRdRun(rc, lab, tmp, nD, 0_iwp, TypStr)
     buf = ' '
     do j = 1, nD

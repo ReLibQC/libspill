@@ -136,7 +136,7 @@ int main(void)
         wclose_(&big, &ierr);
     }
 
-    cray_shim_reset();
+    ls_crayio_reset();
     printf("%d checks, %d failed\n", ntest, fails);
     return fails != 0;
 }

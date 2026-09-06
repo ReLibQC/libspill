@@ -1410,6 +1410,22 @@ call the raw `mmap()` out of that module — so the file is modified in place, a
 the honest boundary is libspill for anonymous scratch, the existing POSIX path
 for the named durable EZFIO files §3 excludes anyway.
 
+**And the failure is loud now, not just documented.** `ls_opts_size(version)`
+returns the byte count each version defines, so a consumer that mirrors the
+struct can assert its size once at startup instead of discovering a mismatch as
+memory corruption. libspill's own Fortran and Python bindings do it — the
+Fortran one exposes `ls_abi_ok()`, the Python one raises `ImportError`. Both
+mirror the struct themselves, so both were exposed to exactly the same trap.
+
+The qp2 session sharpened why this is necessary rather than careful: a build
+system that clones libspill at install time — theirs does, via
+`configure -i libspill` — gives the user a library newer than the source the
+port was written against, essentially always. Pinning the mirrored version is
+then the only correct choice. They also kept their guard-word canary as a
+permanent test rather than deleting it once it had proved the point, which is
+the right instinct: the next added field re-arms the trap for anyone mirroring
+the latest layout.
+
 **`ls_unlink_now` came out of this.** qp2 unlinks its anonymous mappings the
 moment they exist, so a crash leaves nothing behind; the session reproduced that
 by rebuilding libspill's path and unlinking it, which works but reaches into a

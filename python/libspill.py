@@ -90,6 +90,22 @@ _lib.ls_opts_default.argtypes = [_P(_Opts)]
 _lib.ls_open.restype = ctypes.c_void_p
 _lib.ls_open.argtypes = [ctypes.c_char_p, _P(_Opts), _P(ctypes.c_int)]
 _lib.ls_store_exists.argtypes = [ctypes.c_char_p, _P(_Opts), _P(ctypes.c_int)]
+_lib.ls_opts_size.restype = ctypes.c_size_t
+_lib.ls_opts_size.argtypes = [ctypes.c_uint32]
+_lib.ls_opts_init.argtypes = [_P(_Opts), ctypes.c_uint32]
+
+# _Opts mirrors a C struct, so a layout disagreement is silent memory
+# corruption rather than an error. Make it loud, once, at import.
+_want = _lib.ls_opts_size(_OPTS_VERSION)
+if _want == 0:
+    raise ImportError(
+        f"libspill does not know ls_opts version {_OPTS_VERSION}; "
+        "the library is older than this binding")
+if ctypes.sizeof(_Opts) != _want:
+    raise ImportError(
+        f"ls_opts layout mismatch: this binding mirrors {ctypes.sizeof(_Opts)} "
+        f"bytes for version {_OPTS_VERSION}, the library says {_want}. "
+        "The binding and libspill.so are out of step.")
 _lib.ls_close.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _lib.ls_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
                           ctypes.c_size_t, ctypes.c_void_p]
@@ -199,7 +215,10 @@ class Store:
                  backend=POSIX, mode=EXPLICIT, parallel=LOCAL, rank=-1,
                  keep=False, exact_name=False):
         o = _Opts()
-        _lib.ls_opts_default(ctypes.byref(o))
+        # ls_opts_init with OUR version, never ls_opts_default: that symbol
+        # fills the newest version and would write past a mirror of an older
+        # layout.
+        _lib.ls_opts_init(ctypes.byref(o), _OPTS_VERSION)
         o.backend = backend
         o.mode = mode
         o.parallel = parallel
@@ -410,7 +429,7 @@ def open(name, **kw) -> Store:        # noqa: A001  -- §4a spells it libspill.o
 def store_exists(name, *, dir=None, exact_name=False, parallel=LOCAL, rank=-1) -> bool:
     """Is there already a store of this name? Does not create one."""
     o = _Opts()
-    _lib.ls_opts_default(ctypes.byref(o))
+    _lib.ls_opts_init(ctypes.byref(o), _OPTS_VERSION)
     o.dir = dir.encode() if dir else None
     o.exact_name = 1 if exact_name else 0
     o.parallel = parallel

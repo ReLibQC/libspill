@@ -54,6 +54,8 @@ static size_t opts_size(uint32_t version)
     }
 }
 
+size_t ls_opts_size(uint32_t version) { return opts_size(version); }
+
 void ls_opts_init(ls_opts *o, uint32_t version)
 {
     size_t n;

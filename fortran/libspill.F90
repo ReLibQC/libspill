@@ -23,6 +23,7 @@ module libspill
   public :: ls_awrite_f, ls_aread_f, ls_wait_f, ls_test_f
   public :: ls_append_f, ls_set_attr_f, ls_get_attr_f
   public :: ls_map_f, ls_unmap_f, ls_store_exists_f
+  public :: ls_unlink_now_f, ls_opts_size_f, ls_abi_ok
   public :: ls_strerror_f
   public :: LS_OK, LS_ERR_NOKEY, LS_ERR_RANGE, LS_ERR_INVAL, LS_ERR_MODE
   public :: LS_ERR_BACKEND, LS_ERR_BUSY, LS_ERR_CORRUPT
@@ -43,6 +44,12 @@ module libspill
   integer(c_int), parameter :: LS_LOCAL = 0, LS_PER_RANK = 1
   integer, parameter :: LS_KEY_MAX = 255
 
+  ! The ls_opts version ls_opts_t below mirrors. Explicit so that adding a
+  ! component is a deliberate edit next to bumping this, and so ls_abi_ok can
+  ! check the mirror against the library it is actually linked to -- the
+  ! disagreement is otherwise silent memory corruption.
+  integer(c_int32_t), parameter :: LS_OPTS_VERSION_MIRRORED = 2_c_int32_t
+
   ! Mirrors ls_opts. Obtain one from ls_defaults, never by declaring and filling.
   type, bind(c) :: ls_opts_t
     integer(c_int32_t) :: version
@@ -60,10 +67,26 @@ module libspill
   end type ls_opts_t
 
   interface
-    subroutine c_opts_default(o) bind(c, name='ls_opts_default')
-      import :: ls_opts_t
+    ! ls_opts_init, never ls_opts_default: that symbol fills the NEWEST
+    ! version and would write past a mirror of an older layout. ls_opts_t here
+    ! mirrors LS_OPTS_VERSION_MIRRORED below; bumping one means bumping both.
+    subroutine c_opts_init(o, version) bind(c, name='ls_opts_init')
+      import :: ls_opts_t, c_int32_t
       type(ls_opts_t), intent(out) :: o
+      integer(c_int32_t), value :: version
     end subroutine
+
+    function c_opts_size(version) bind(c, name='ls_opts_size') result(n)
+      import :: c_int32_t, c_size_t
+      integer(c_int32_t), value :: version
+      integer(c_size_t) :: n
+    end function
+
+    function c_unlink_now(s) bind(c, name='ls_unlink_now') result(rc)
+      import :: c_ptr, c_int
+      type(c_ptr), value :: s
+      integer(c_int) :: rc
+    end function
 
     function c_open(name, o, err) bind(c, name='ls_open') result(s)
       import :: c_ptr, c_char, c_int, ls_opts_t
@@ -245,8 +268,29 @@ contains
 
   function ls_defaults() result(o)
     type(ls_opts_t) :: o
-    call c_opts_default(o)
+    call c_opts_init(o, LS_OPTS_VERSION_MIRRORED)
   end function ls_defaults
+
+  function ls_opts_size_f(version) result(n)
+    integer(c_int32_t), intent(in) :: version
+    integer(c_size_t) :: n
+    n = c_opts_size(version)
+  end function ls_opts_size_f
+
+  ! .true. when this module's ls_opts_t matches the linked library's idea of the
+  ! version it mirrors. Call it once at startup; a mismatch means the binding
+  ! and libspill are out of step and nothing below is safe.
+  function ls_abi_ok() result(ok)
+    logical :: ok
+    type(ls_opts_t) :: probe
+    ok = (c_opts_size(LS_OPTS_VERSION_MIRRORED) == c_sizeof(probe))
+  end function ls_abi_ok
+
+  function ls_unlink_now_f(s) result(rc)
+    type(c_ptr), intent(in) :: s
+    integer(c_int) :: rc
+    rc = c_unlink_now(s)
+  end function ls_unlink_now_f
 
   ! Every argument below carries an explicit C-matching kind. An ABI binding
   ! whose dummies are plain `integer` breaks under -fdefault-integer-8 or any

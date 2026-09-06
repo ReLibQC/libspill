@@ -95,7 +95,24 @@ link `-lspill` alone. Two things to get right if you do:
   version and will write past a struct mirrored from an older header. Pass the
   version your mirror matches — 1 is 64 bytes through `log_ctx`, 2 adds
   `exact_name`.
-- **Check the `ls_opts` mirror field by field** against `offsetof` in C, once.
+- **Pin the version you mirror, and assert it at startup.**
+  `ls_opts_size(version)` returns the byte count that version defines, so one
+  check turns a silent overrun into a loud error:
+
+  ```c
+  assert(sizeof(my_mirror_of_ls_opts) == ls_opts_size(MY_MIRRORED_VERSION));
+  ```
+
+  Pin rather than track: mirroring the newest layout buys nothing unless you
+  actually set the newest fields, and it re-arms the same trap at the next
+  version. libspill's own Fortran and Python bindings do this — see
+  `ls_abi_ok()` and the import-time check in `python/libspill.py`.
+
+**Why this is necessary rather than merely careful:** a code that installs
+libspill from a moving branch — `git clone` at install time, which is what
+several build systems do — gets a library *newer* than the source its port was
+written against, essentially always. Pinning the mirrored version is then the
+only correct choice, not a defensive one.
 
 ## Vendoring
 

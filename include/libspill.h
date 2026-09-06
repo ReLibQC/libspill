@@ -188,6 +188,21 @@ LS_API /* Fills o with defaults. Call it through the ls_opts_default macro below
  * compiled from an older header cannot write past its end. */
 LS_API void ls_opts_init(ls_opts *o, uint32_t version);
 
+/* How many bytes of ls_opts a given version defines; 0 if this library does not
+ * know that version.
+ *
+ * For consumers that MIRROR this struct rather than including this header --
+ * Fortran interfaces, ctypes, any FFI. The failure mode when a mirror and the
+ * library disagree is silent memory corruption, so make it loud: assert once at
+ * startup that your mirror's size equals ls_opts_size(the version you mirrored).
+ * The libspill Fortran and Python bindings both do exactly this.
+ *
+ * This matters more than it looks. A code that installs libspill from a moving
+ * branch has a library NEWER than the source its port was written against,
+ * essentially always -- so pinning the version you mirror is not defensive, it
+ * is the only correct thing to do. */
+LS_API size_t ls_opts_size(uint32_t version);
+
 /* Retained so binaries compiled before ls_opts_init exists keep working; new
  * code gets the macro.
  *

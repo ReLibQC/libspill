@@ -26,6 +26,13 @@ program test_fortran
 
   write(6,'(a)') 'libspill Fortran binding'
 
+  ! First, because nothing else is meaningful if the mirror disagrees.
+  call check(ls_abi_ok(), 'ls_opts_t matches the linked library''s layout')
+  call check(ls_opts_size_f(1_c_int32_t) == 64_c_size_t, &
+             'version 1 is still 64 bytes -- older mirrors stay valid')
+  call check(ls_opts_size_f(99_c_int32_t) == 0_c_size_t, &
+             'an unknown version reports 0 rather than guessing')
+
   do i = 1, 4096
     a(i) = 1.0d0 + 0.25d0 * i
   end do

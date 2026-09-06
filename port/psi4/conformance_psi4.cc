@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /* Conformance check: does the shim implement Psi4's ACTUAL declarations?
  *
  * §6b measured the port against psio_types.h, our copy of Psi4's public types.

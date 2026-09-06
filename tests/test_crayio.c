@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Conformance test for the crayio shim (§6a).
  *
  * The question is narrow: can §4's API express the word-addressed workload that

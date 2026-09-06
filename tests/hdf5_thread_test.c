@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Does HDF5 concurrency work well enough to build an async layer on?
  *
  * Two regimes, both bad for different reasons:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # libspill -- POSIX backend, no dependencies beyond pthreads.
 
 CC      ?= cc

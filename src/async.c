@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* The asynchronous layer -- "the reason the library exists" (DESIGN.md §4), and
  * the only place criterion 2 can be earned, since §7b's measurements confine it
  * to the POSIX backend.

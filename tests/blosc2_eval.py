@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
 """Does Blosc2 earn a place as a libspill backend?
 
 The question is not whether it compresses -- it is whether compress+write beats

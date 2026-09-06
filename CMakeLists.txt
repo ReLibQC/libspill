@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # libspill -- scratch and out-of-core I/O for electronic-structure codes.
 #
 # The success criterion in DESIGN.md §1 is deprecation: an existing layer

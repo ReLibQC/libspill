@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # A consumer project, deliberately outside the libspill build.
 #
 # This is the packaging check: DESIGN.md §1's criterion is deprecation, and a

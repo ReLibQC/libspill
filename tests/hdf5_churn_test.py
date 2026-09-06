@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
 """Does an HDF5 file balloon when records are deleted and recreated?
 
 The scratch pattern is not just overwrite-in-place (which HDF5 handles at x1.00).

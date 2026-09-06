@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 // libspill -- header-only C++ layer.
 //
 // DESIGN.md §4a: "The C layer exists for reach -- Fortran, Python, and a stable

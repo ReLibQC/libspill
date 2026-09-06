@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! Routines OpenMolcas supplies that the shims call on fatal argument errors.
 ! In OpenMolcas these already exist -- SysAbendMsg prints a formatted banner and
 ! calls Abend() -- so this file is deleted on the way in. It is here only so the

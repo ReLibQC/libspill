@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 // The C++ layer of §4a, and ls_accumulate beneath it.
 //
 // §4a's sketch is the specification:

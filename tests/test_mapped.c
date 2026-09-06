@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* LS_MAPPED (§3): the opt-in second mode, added after the survey found qp2 and
  * RMG using mapped scratch for real work.
  *

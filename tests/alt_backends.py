@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 """Same four questions, other candidate stores. sqlite3 is stdlib; blosc2 is C/BSD-3."""
 import os, tempfile, shutil, sqlite3, numpy as np
 tmp=tempfile.mkdtemp(prefix="alt_"); N=1<<17; live=N*8

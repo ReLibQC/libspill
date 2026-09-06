@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Store lifecycle, and the on-disk superblock that makes keep=1 mean something.
  * Restart is out of scope (DESIGN.md §3): the persisted table of contents
  * exists so a scratch file can be inspected and reopened while debugging a

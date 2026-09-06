@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* The five requests §3a extracted from the surveys, as tests.
  *
  * §3a(1) LS_SHARED       7 codes   -- exercised across real processes, below

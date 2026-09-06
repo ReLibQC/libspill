@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* libspill -- scratch and out-of-core I/O for electronic-structure codes.
  *
  * This header is the ABI. The C layer exists for reach -- Fortran, Python, and

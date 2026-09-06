@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! The integer and real kinds OpenMolcas's interfaces are declared with.
 !
 ! In OpenMolcas this module does not exist: the shims say

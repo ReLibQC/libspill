@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 import os, shutil, tempfile, numpy as np, adios2
 tmp=tempfile.mkdtemp(prefix="adios_grow_"); p=os.path.join(tmp,"s.bp")
 N=1<<17                      # 128k doubles = 1 MiB record

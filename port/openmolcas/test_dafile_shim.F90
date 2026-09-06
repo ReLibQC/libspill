@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! Exercises the DaFile shim the way OpenMolcas exercises io_util: a threaded
 ! iDisk cursor, both media block lengths, and the block rounding that callers
 ! add counts to.

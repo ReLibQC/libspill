@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Extent allocator.
  *
  * This is the part §7b says must be ours rather than HDF5's: "extent allocation

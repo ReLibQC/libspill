@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 #include "psio_libspill.h"
 
 #include <cstdio>

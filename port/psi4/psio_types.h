@@ -1,4 +1,15 @@
-/* The public types and constants of Psi4's libpsio, reproduced verbatim so the
+/* Deliberately NOT carrying libspill's SPDX tag.
+ *
+ * This file transcribes the public types and constants of Psi4's libpsio --
+ * struct layouts, enumerator values, PSIO_PAGELEN -- so that the shim compiles
+ * and is tested outside the Psi4 tree. They are interoperability facts about
+ * someone else's interface rather than libspill's own work, and Psi4 is
+ * LGPL-3. Nothing here is needed when building inside Psi4: define
+ * PSIO_USE_PSI4_HEADERS and psio.h supplies all of it, which is also the
+ * conformance build (§6e). Whoever ships libspill should decide how to label
+ * this file; the rest of the repository is BSD-3-Clause.
+ *
+ * The public types and constants of Psi4's libpsio, reproduced so the
  * shim compiles and is tested outside the Psi4 tree. In Psi4 this file is not
  * used at all: psio.h and config.h already declare these, unchanged. Keeping a
  * copy here is what lets the port be exercised before Psi4 is rebuilt.

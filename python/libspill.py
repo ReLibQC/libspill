@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 """libspill -- Python binding.
 
 DESIGN.md §4a: a context manager, NumPy throughout, and reads into a

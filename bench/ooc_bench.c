@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Out-of-core benchmark: does asynchronous overlap actually win?
  *
  * This is success criterion 2 (DESIGN.md §1), and the only question the design

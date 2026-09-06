@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 """Checks §4a's Python sketch works as written, and that mapping gives NumPy
 semantics with no copy."""
 import os

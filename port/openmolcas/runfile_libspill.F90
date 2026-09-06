@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! OpenMolcas's RunFile generic core, reimplemented on libspill.
 !
 ! This is the port §6c said was not done, and it is a different kind of job from

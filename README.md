@@ -141,5 +141,12 @@ The honest summary is that the hard parts are built and the evidence is not in.
 
 ## Licence
 
-See the repository. The intent is a permissive licence, so that the codes this
-targets can vendor it without friction.
+BSD-3-Clause; see [`LICENSE`](LICENSE). Every source file carries an
+`SPDX-License-Identifier`, so a code that vendors libspill can label it without
+reading the tree.
+
+One exception, marked in the file itself: `port/psi4/psio_types.h` transcribes
+Psi4's own public declarations so the shim can be tested outside the Psi4 tree.
+Those are interoperability facts about an LGPL-3 interface rather than
+libspill's own work, and the file is not needed when building inside Psi4 —
+define `PSIO_USE_PSI4_HEADERS` and Psi4's `psio.h` supplies them.

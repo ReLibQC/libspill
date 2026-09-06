@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* POSIX backend: one file per store, a heap with its own table of contents and
  * extent free list (DESIGN.md §4b). Not a directory of files per key -- that is
  * what makes the free-list reuse ours to control, and it sidesteps the

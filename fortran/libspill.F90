@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! libspill -- Fortran interface.
 !
 ! DESIGN.md §4a: "The C entry points remain public and supported -- Fortran needs

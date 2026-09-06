@@ -22,7 +22,7 @@ Evidence base: the 53-code survey in `/home/work/libxcsurvey` — `scan_io.py`
 dedicated `SCRATCH_IO_SURVEY.md` per code. Quotations in this document cite those.
 
 A reusable scratch and out-of-core I/O library for electronic-structure codes.
-C99 core, C/C++/Fortran/Python bindings, permissive licence.
+C99 core, C/C++/Fortran/Python bindings, BSD-3-Clause.
 
 ## 1. Success criteria (these define the project)
 
@@ -1096,10 +1096,17 @@ in one pass, so a broken export or a missing header fails here rather than in
 someone else's build. `README.md` states the status honestly, including that
 neither success criterion is met.
 
-Still missing, and not ours to choose: a `LICENSE` file. DESIGN.md's opening
-line promises a permissive licence and the repository does not contain one,
-which for a component meant to be vendored is a real blocker rather than an
-oversight.
+**Licensing is settled: BSD-3-Clause**, with a `LICENSE` file and an
+`SPDX-License-Identifier` in every source file, so a code that vendors libspill
+can label it without reading the tree.
+
+One file is deliberately excluded and says so: `port/psi4/psio_types.h`
+transcribes Psi4's public declarations — struct layouts, enumerator values,
+`PSIO_PAGELEN` — so the shim can be built and tested outside the Psi4 tree.
+Those are interoperability facts about an LGPL-3 interface rather than our own
+work. Nothing depends on resolving it, because the file is not used when
+building inside Psi4: `-DPSIO_USE_PSI4_HEADERS` takes them from `psio.h`
+instead, which is also the conformance build of §6e.
 
 ## 7. Validation plan
 

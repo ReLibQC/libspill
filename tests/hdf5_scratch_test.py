@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
 """Can HDF5 serve as the backend for a scratch heap?
 
 Same questions put to ADIOS2 in adios_rmw_test.py, which failed all three:

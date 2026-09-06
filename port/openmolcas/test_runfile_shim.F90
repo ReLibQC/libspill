@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! Exercises the RunFile shim the way OpenMolcas's typed wrappers exercise the
 ! generic core: gxWrRun / gxRdRun / ffxRun with a 16-character Label and a
 ! record type.

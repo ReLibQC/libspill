@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Psi4's libpsio, reimplemented on libspill.
  *
  * The signatures below are Psi4's, unchanged. That is the whole point: §7 of

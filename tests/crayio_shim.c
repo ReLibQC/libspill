@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* The 1980s Cray word-addressable I/O emulation, over libspill.
  *
  * §6a calls this a conformance target rather than an adoption target, and that

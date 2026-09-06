@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Correctness suite for the POSIX backend: the §4b contract, the memory tier,
  * the async layer, and the concurrency §5a promises. */
 #include <errno.h>

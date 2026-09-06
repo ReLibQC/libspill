@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 ! OpenMolcas's DaFile family, reimplemented on libspill.
 !
 ! Unlike the Psi4 port (DESIGN.md §6b), this one cannot treat the address as

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
 """Can ADIOS2 serve as a scratch heap? -- the read-modify-write question.
 
 Quantum-chemistry scratch I/O (Psi4 libpsio, OpenMolcas RunFile) is a HEAP

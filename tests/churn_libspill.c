@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* The other half of tests/hdf5_churn_varsize.py, run against this backend.
  *
  * Same protocol: 8 records, 60 cycles, each cycle erasing one record and

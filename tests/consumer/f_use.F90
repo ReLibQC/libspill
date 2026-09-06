@@ -1,3 +1,4 @@
+! SPDX-License-Identifier: BSD-3-Clause
 program f_use
   use, intrinsic :: iso_c_binding
   use libspill

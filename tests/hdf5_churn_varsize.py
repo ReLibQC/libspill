@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 import os, tempfile, shutil, numpy as np, h5py
 tmp=tempfile.mkdtemp(prefix="h5c2_"); rng=np.random.default_rng(1)
 def churn(path, cycles=60, **kw):

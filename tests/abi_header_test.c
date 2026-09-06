@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* Checks the assumptions DESIGN.md §4b makes about the ABI, so that they fail
  * loudly on a platform where they do not hold rather than silently aliasing an
  * OS error onto one of ours.

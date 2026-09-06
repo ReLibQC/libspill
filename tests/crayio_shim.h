@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 #ifndef CRAYIO_SHIM_H
 #define CRAYIO_SHIM_H
 

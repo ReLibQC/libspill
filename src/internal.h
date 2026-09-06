@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /* libspill POSIX backend -- internal structures. Not installed. */
 #ifndef LS_INTERNAL_H
 #define LS_INTERNAL_H

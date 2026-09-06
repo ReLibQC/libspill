@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /* Exercises the shim the way Psi4 exercises libpsio. The patterns here were
  * taken from the call sites, not invented: the streaming write/read loop that
  * threads psio_address through a sequence of blocks is what libdpd, libtrans and

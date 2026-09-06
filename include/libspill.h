@@ -300,7 +300,15 @@ int ls_unmap(ls_store *s, const char *key);
  *
  * Concurrency is §5a's, unchanged: this is a read-modify-write, and two
  * concurrent accumulations into the same range would lose one update. That is
- * the caller's to prevent. The surveyed codes settle it by isolation rather
+ * the caller's to prevent -- and note that being synchronous is what makes it
+ * preventable. Two accumulations issued from one thread are ordered by that
+ * thread's own program order. An asynchronous form would have no such
+ * ordering: two ls_aaccumulate calls on one range, issued back to back from a
+ * single thread, could be run concurrently by the worker pool and lose an
+ * update that no caller could have lost by hand. That is why the async form is
+ * deferred rather than merely unimplemented; offering it means first deciding
+ * whether to order requests per range, which §5a's no-data-lock stance argues
+ * against, or to document a prohibition callers cannot easily check. The surveyed codes settle it by isolation rather
  * than locking, and a library that serialised here would be slower than the
  * layers it replaces while claiming to be faster. */
 typedef void (*ls_reduce)(void *dst, const void *src, size_t nbytes, void *ctx);
@@ -333,9 +341,14 @@ int ls_get_attr(ls_store *s, const char *key,       void *blob, size_t *n);
 /* Not in this version, and shaped here so that adding them stays ABI-compatible
  * (new functions, new enum values, new trailing ls_opts members):
  *
-   ls_aaccumulate          the asynchronous form; no consumer has asked, and
- *                           the reduction would run on an I/O thread, which is
- *                           a contract worth stating before offering.
+ *   ls_aaccumulate          the asynchronous form. Two reasons, and the second
+ *                           is the real one. No consumer has asked: the case
+ *                           for accumulate at all comes from NWChem's TCE
+ *                           add_block, which is synchronous, and none of the
+ *                           five requests in DESIGN.md §3a is for an async
+ *                           form. And it would introduce an ordering hazard
+ *                           the caller cannot introduce themselves -- see the
+ *                           note on ls_accumulate above.
  *   ls_read_strided,         superseded by ls_readv/ls_writev above: a regular
  *   ls_write_strided         stride is a segment list with a regular offset,
  *                            and the segment list also serves the scatter cases

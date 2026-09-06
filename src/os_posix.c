@@ -8,6 +8,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -77,6 +79,30 @@ int ls_os_zero_range(int fd, uint64_t off, uint64_t len)
     return -1;
 #endif
 }
+
+void ls_os_strerror(int errnum, char *buf, size_t buflen)
+{
+    if (buflen == 0) return;
+#if defined(__GLIBC__) && defined(_GNU_SOURCE)
+    {   /* GNU: returns the text, which may or may not be in buf */
+        const char *p = strerror_r(errnum, buf, buflen);
+        if (p != buf) snprintf(buf, buflen, "%s", p ? p : "unknown error");
+    }
+#else
+    if (strerror_r(errnum, buf, buflen) != 0)
+        snprintf(buf, buflen, "errno %d", errnum);
+#endif
+    buf[buflen - 1] = '\0';
+}
+
+void *ls_os_aligned_alloc(size_t align, size_t n)
+{
+    void *p = NULL;
+    if (posix_memalign(&p, align, n) != 0) return NULL;
+    return p;
+}
+
+void ls_os_aligned_free(void *p) { free(p); }
 
 /* ----------------------------------------------------------------- threads */
 

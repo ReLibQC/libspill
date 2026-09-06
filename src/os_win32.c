@@ -15,8 +15,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
+#include <malloc.h>
 #include <process.h>
 #include <share.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -183,6 +185,19 @@ int ls_os_zero_range(int fd, uint64_t off, uint64_t len)
     errno = ENOSYS;
     return -1;
 }
+
+void ls_os_strerror(int errnum, char *buf, size_t buflen)
+{
+    if (buflen == 0) return;
+    if (strerror_s(buf, buflen, errnum) != 0)
+        snprintf(buf, buflen, "errno %d", errnum);
+    buf[buflen - 1] = '\0';
+}
+
+/* _aligned_malloc, not malloc: the CRT tracks the adjustment it made, which is
+ * why the matching _aligned_free is not optional. */
+void *ls_os_aligned_alloc(size_t align, size_t n) { return _aligned_malloc(n, align); }
+void  ls_os_aligned_free(void *p) { _aligned_free(p); }
 
 /* ----------------------------------------------------------------- threads
  *

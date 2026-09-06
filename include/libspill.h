@@ -193,7 +193,7 @@ typedef struct {
  * header keeps working against a newer library. Always obtain an ls_opts from
  * ls_opts_default rather than declaring one and filling it in. */
 
-LS_API /* Fills o with defaults. Call it through the ls_opts_default macro below, which
+/* Fills o with defaults. Call it through the ls_opts_default macro below, which
  * passes the version YOUR header declares -- the library then writes only the
  * fields that version defines, so linking a newer libspill against a struct
  * compiled from an older header cannot write past its end. */

@@ -17,13 +17,6 @@
 
 /* ------------------------------------------------------------- raw file I/O */
 
-static void *aligned_alloc_or_null(size_t n)
-{
-    void *p = NULL;
-    if (posix_memalign(&p, LS_ALIGN, n) != 0) return NULL;
-    return p;
-}
-
 /* Retries short transfers, so the data calls are all-or-nothing to the caller
  * as §4b promises. Under O_DIRECT everything is staged through an aligned
  * bounce buffer: correctness first, and the benchmark's reason for wanting
@@ -59,7 +52,7 @@ static int rw_all(ls_store *s, void *buf, const void *cbuf, size_t n,
     }
 
     {   /* O_DIRECT: offset, length and buffer must all be LS_ALIGN-aligned */
-        unsigned char *bb = aligned_alloc_or_null(LS_BOUNCE);
+        unsigned char *bb = ls_os_aligned_alloc(LS_ALIGN, LS_BOUNCE);
         int rc = LS_OK;
         if (!bb) return -ENOMEM;
 
@@ -90,7 +83,7 @@ static int rw_all(ls_store *s, void *buf, const void *cbuf, size_t n,
             if (r < 0) { rc = (errno == EINTR) ? LS_OK : -errno; if (rc) break; continue; }
             done += chunk;
         }
-        free(bb);
+        ls_os_aligned_free(bb);
         return rc;
     }
 }
@@ -112,7 +105,7 @@ static int zero_range(ls_store *s, uint64_t off, uint64_t len)
 
     if (!s->direct && ls_os_zero_range(s->fd, off, len) == 0)
         return LS_OK;
-    z = aligned_alloc_or_null(CH);
+    z = ls_os_aligned_alloc(LS_ALIGN, CH);
     if (!z) return -ENOMEM;
     memset(z, 0, CH);
     while (len && rc == LS_OK) {
@@ -121,7 +114,7 @@ static int zero_range(ls_store *s, uint64_t off, uint64_t len)
         off += k;
         len -= k;
     }
-    free(z);
+    ls_os_aligned_free(z);
     return rc;
 }
 

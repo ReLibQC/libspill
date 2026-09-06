@@ -72,6 +72,20 @@ int      ls_os_getpid(void);
  * is always correct and merely slower. */
 int      ls_os_zero_range(int fd, uint64_t off, uint64_t len);
 
+/* Fill buf with the system's text for errnum, always NUL-terminated and always
+ * something. This is in the floor because the three implementations disagree
+ * about almost everything: glibc's strerror_r returns char* and may not touch
+ * the buffer at all, XSI's returns int, and the MSVC CRT spells it
+ * strerror_s with the arguments in a different order. Getting it wrong prints
+ * uninitialised stack. */
+void     ls_os_strerror(int errnum, char *buf, size_t buflen);
+
+/* LS_ALIGN-aligned allocation, for the uncached-I/O bounce buffers. The free
+ * has to match the alloc: memory from Windows' _aligned_malloc must never
+ * reach free(), and it does not fault until much later if it does. */
+void    *ls_os_aligned_alloc(size_t align, size_t n);
+void     ls_os_aligned_free(void *p);
+
 /* ----------------------------------------------------------------- threads
  *
  * A mutex, a condition variable and a joinable thread: the whole of what this

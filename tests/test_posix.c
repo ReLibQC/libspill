@@ -132,8 +132,13 @@ static void t_options(void)
     ls_opts_default(&o);
     o.mode = LS_MAPPED;
     s = ls_open("t_opt_m", &o, &err);
-    ok(s != NULL && err == LS_OK, "LS_MAPPED store opens");
-    if (s) ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
+    if (!s && err == LS_ERR_MODE) {
+        ok(1, "LS_MAPPED is refused with LS_ERR_MODE (no mapping on this platform)");
+        ok(1, "  ... which is the documented answer where mapping is absent");
+    } else {
+        ok(s != NULL && err == LS_OK, "LS_MAPPED store opens");
+        if (s) ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
+    }
 
     /* the combination that is wrong in principle outranks the one that is
      * merely not built yet, so this stays stable when LS_MAPPED lands */

@@ -19,8 +19,8 @@ static void req_release(ls_store *s, ls_req *r)   /* q_lk held */
 {
     if (r->lprev) r->lprev->lnext = r->lnext; else s->live = r->lnext;
     if (r->lnext) r->lnext->lprev = r->lprev;
-    pthread_mutex_destroy(&r->lk);
-    pthread_cond_destroy(&r->cv);
+    ls_mutex_destroy(&r->lk);
+    ls_cond_destroy(&r->cv);
     free(r);
 }
 
@@ -31,30 +31,30 @@ static void *worker(void *arg)
     for (;;) {
         ls_req *r;
 
-        pthread_mutex_lock(&s->q_lk);
+        ls_mutex_lock(&s->q_lk);
         while (!s->qh && !s->stop)
-            pthread_cond_wait(&s->q_cv, &s->q_lk);
-        if (!s->qh && s->stop) { pthread_mutex_unlock(&s->q_lk); break; }
+            ls_cond_wait(&s->q_cv, &s->q_lk);
+        if (!s->qh && s->stop) { ls_mutex_unlock(&s->q_lk); break; }
 
         r = s->qh;
         s->qh = r->next;
         if (!s->qh) s->qt = NULL;
-        pthread_mutex_unlock(&s->q_lk);
+        ls_mutex_unlock(&s->q_lk);
 
         {
             int rc = ls_rw(s, r->key, r->off, r->n,
                            r->rbuf, r->wbuf, r->op);
-            pthread_mutex_lock(&r->lk);
+            ls_mutex_lock(&r->lk);
             r->status = rc;
             r->done = 1;
-            pthread_cond_broadcast(&r->cv);
-            pthread_mutex_unlock(&r->lk);
+            ls_cond_broadcast(&r->cv);
+            ls_mutex_unlock(&r->lk);
 
-            pthread_mutex_lock(&s->q_lk);
+            ls_mutex_lock(&s->q_lk);
             if (rc != LS_OK && s->drain_err == LS_OK) s->drain_err = rc;
             s->inflight--;
-            pthread_cond_broadcast(&s->q_cv);
-            pthread_mutex_unlock(&s->q_lk);
+            ls_cond_broadcast(&s->q_cv);
+            ls_mutex_unlock(&s->q_lk);
         }
     }
     return NULL;
@@ -73,7 +73,7 @@ int ls_pool_start(ls_store *s)
     if (!s->thr) return -ENOMEM;
 
     for (i = 0; i < n; i++)
-        if (pthread_create(&s->thr[i], NULL, worker, s) != 0) break;
+        if (ls_thread_create(&s->thr[i], worker, s) != 0) break;
     s->nthr = i;
     if (s->nthr == 0) { free(s->thr); s->thr = NULL; return -EAGAIN; }
     return LS_OK;
@@ -87,20 +87,20 @@ void ls_pool_stop(ls_store *s)
 {
     size_t i;
 
-    pthread_mutex_lock(&s->q_lk);
+    ls_mutex_lock(&s->q_lk);
     s->stop = 1;
-    pthread_cond_broadcast(&s->q_cv);
-    pthread_mutex_unlock(&s->q_lk);
+    ls_cond_broadcast(&s->q_cv);
+    ls_mutex_unlock(&s->q_lk);
 
     for (i = 0; i < s->nthr; i++)
-        pthread_join(s->thr[i], NULL);
+        ls_thread_join(s->thr[i]);
     free(s->thr);
     s->thr = NULL;
     s->nthr = 0;
 
-    pthread_mutex_lock(&s->q_lk);
+    ls_mutex_lock(&s->q_lk);
     while (s->live) req_release(s, s->live);
-    pthread_mutex_unlock(&s->q_lk);
+    ls_mutex_unlock(&s->q_lk);
 }
 
 static int submit(ls_store *s, const char *key, uint64_t off, size_t n,
@@ -124,14 +124,14 @@ static int submit(ls_store *s, const char *key, uint64_t off, size_t n,
     r->n = n;
     r->rbuf = rbuf;
     r->wbuf = wbuf;
-    pthread_mutex_init(&r->lk, NULL);
-    pthread_cond_init(&r->cv, NULL);
+    ls_mutex_init(&r->lk);
+    ls_cond_init(&r->cv);
 
-    pthread_mutex_lock(&s->q_lk);
+    ls_mutex_lock(&s->q_lk);
     if (s->stop) {
-        pthread_mutex_unlock(&s->q_lk);
-        pthread_mutex_destroy(&r->lk);
-        pthread_cond_destroy(&r->cv);
+        ls_mutex_unlock(&s->q_lk);
+        ls_mutex_destroy(&r->lk);
+        ls_cond_destroy(&r->cv);
         free(r);
         return LS_ERR_BUSY;
     }
@@ -142,8 +142,8 @@ static int submit(ls_store *s, const char *key, uint64_t off, size_t n,
     if (s->qt) s->qt->next = r; else s->qh = r;
     s->qt = r;
     s->inflight++;
-    pthread_cond_signal(&s->q_cv);
-    pthread_mutex_unlock(&s->q_lk);
+    ls_cond_signal(&s->q_cv);
+    ls_mutex_unlock(&s->q_lk);
 
     *out = r;
     return LS_OK;
@@ -165,23 +165,23 @@ int ls_wait(ls_req *req)
     if (!req) return LS_ERR_INVAL;
     s = req->s;
 
-    pthread_mutex_lock(&req->lk);
+    ls_mutex_lock(&req->lk);
     while (!req->done)
-        pthread_cond_wait(&req->cv, &req->lk);
+        ls_cond_wait(&req->cv, &req->lk);
     rc = req->status;
-    pthread_mutex_unlock(&req->lk);
+    ls_mutex_unlock(&req->lk);
 
-    pthread_mutex_lock(&s->q_lk);
+    ls_mutex_lock(&s->q_lk);
     req_release(s, req);
-    pthread_mutex_unlock(&s->q_lk);
+    ls_mutex_unlock(&s->q_lk);
     return rc;
 }
 
 int ls_test(ls_req *req, int *done)
 {
     if (!req || !done) return LS_ERR_INVAL;
-    pthread_mutex_lock(&req->lk);
+    ls_mutex_lock(&req->lk);
     *done = req->done;
-    pthread_mutex_unlock(&req->lk);
+    ls_mutex_unlock(&req->lk);
     return LS_OK;
 }

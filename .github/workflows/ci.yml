@@ -62,6 +62,57 @@ jobs:
           export LD_LIBRARY_PATH="$(dirname "$(find "$PWD/prefix" -name 'libspill.so.0.*')")"
           ./consumer/c_use && ./consumer/cxx_use && ./consumer/f_use
 
+  # Windows. Psi4 and OpenMolcas both ship Windows builds, so this is not a
+  # courtesy target: an adopter replacing its own I/O layer cannot carry a
+  # dependency that drops a platform it already supports. MSVC and clang-cl
+  # both, because clang-cl is what Psi4's Windows CI actually uses and the two
+  # disagree often enough to be worth separating.
+  windows:
+    name: windows (${{ matrix.toolset }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolset: msvc
+            flags: ""
+          - toolset: clang-cl
+            flags: "-T ClangCL"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build ${{ matrix.flags }}
+          -DLIBSPILL_BUILD_TESTS=ON
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/prefix
+      - name: Build
+        run: cmake --build build --config Release -j
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Install and consume
+        shell: bash
+        run: |
+          cmake --install build --config Release
+          cmake -S tests/consumer -B consumer \
+                -Dlibspill_DIR="$(dirname "$(find "$PWD/prefix" -name libspillConfig.cmake)")"
+          cmake --build consumer --config Release -j
+
+  # The Windows code path, run on Linux. Windows has no mmap, so LS_MAPPED is
+  # refused there and ls_map/ls_unmap take a different branch; LS_NO_MMAP
+  # compiles and runs exactly those branches here, where the whole suite can
+  # exercise them, instead of leaving them to be discovered on Windows.
+  no-mmap:
+    name: no mapping (the Windows path, on Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y cmake
+      - name: Configure, build and test
+        run: |
+          cmake -S . -B build -DLIBSPILL_BUILD_TESTS=ON -DCMAKE_C_FLAGS=-DLS_NO_MMAP
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
   # The suite must also pass with every optional piece absent -- that is what a
   # code taking only the POSIX core would build.
   minimal:

@@ -75,6 +75,16 @@ int main(void)
     ok(ls_open("m_bad", &o, &err) == NULL && err == LS_ERR_INVAL,
        "O_DIRECT and mmap together are refused");
 
+    /* Everything above is option validation, which holds everywhere. The rest
+     * needs mapping to exist. Where it does not -- Windows today -- ls_open
+     * says so with LS_ERR_MODE, and there is nothing here left to test. */
+    s = open_mapped("m_probe", &err);
+    if (!s && err == LS_ERR_MODE) {
+        puts("  [SKIP] mapping is not supported on this platform");
+        return 77;
+    }
+    if (s) ls_close(s, 0);
+
     /* A single-extent record. */
     s = open_mapped("m_one", &err);
     ok(s != NULL, "open a mapped store");

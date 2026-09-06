@@ -3,7 +3,7 @@
 #ifndef LS_INTERNAL_H
 #define LS_INTERNAL_H
 
-#include <pthread.h>
+#include "os.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -55,19 +55,19 @@ struct ls_store {
      * data itself, which is both the point (§7b: inspectable with h5ls) and
      * the defect (x1.4-1.8 under varying-size churn). */
     long             h5_file;         /* hid_t, kept opaque to this header     */
-    pthread_mutex_t  h5_lk;
+    ls_mutex  h5_lk;
 #endif
     char            *path;
     ls_opts          o;
     int              direct;          /* O_DIRECT actually in force            */
 
     /* table of contents. Locked -- DESIGN.md §4b. Never held across I/O. */
-    pthread_mutex_t  toc_lk;
+    ls_mutex  toc_lk;
     ls_rec         **tab;
     size_t           nbuckets, nrec;
 
     /* extent allocator: free list sorted by offset, coalescing on release */
-    pthread_mutex_t  alloc_lk;
+    ls_mutex  alloc_lk;
     int              teardown;        /* in ls_close: stop recycling extents   */
     ls_extent      **retired;         /* extent arrays a reader may still hold */
     size_t           nretired, retcap;
@@ -80,10 +80,10 @@ struct ls_store {
     ls_rec          *lru_head, *lru_tail;   /* head = most recently used */
 
     /* async worker pool */
-    pthread_t       *thr;
+    ls_thread       *thr;
     size_t           nthr;
-    pthread_mutex_t  q_lk;
-    pthread_cond_t   q_cv;
+    ls_mutex  q_lk;
+    ls_cond   q_cv;
     struct ls_req   *qh, *qt;         /* pending queue                         */
     struct ls_req   *live;            /* every request not yet reaped          */
     int              stop;
@@ -101,8 +101,8 @@ struct ls_req {
     const void     *wbuf;
     int             status;
     int             done;
-    pthread_mutex_t lk;
-    pthread_cond_t  cv;
+    ls_mutex lk;
+    ls_cond  cv;
     struct ls_req  *next;             /* pending queue                         */
     struct ls_req  *lnext, *lprev;    /* live list, for release at ls_close    */
 };

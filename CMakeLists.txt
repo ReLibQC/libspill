@@ -40,12 +40,32 @@ add_library(spill
   src/async.c)
 add_library(libspill::spill ALIAS spill)
 
+# The platform floor: every system call the library makes goes through os.h, so
+# that exactly one of these two files is built and nothing else is conditional.
+if(WIN32)
+  target_sources(spill PRIVATE src/os_win32.c)
+else()
+  target_sources(spill PRIVATE src/os_posix.c)
+endif()
+
 target_include_directories(spill
   PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_compile_features(spill PRIVATE c_std_99)
+
+# Windows exports nothing from a DLL unless it is marked, so LS_API has to
+# become __declspec(dllexport) while this library is being built and
+# __declspec(dllimport) in a consumer -- see the LS_API block in libspill.h.
+# LIBSPILL_STATIC is PUBLIC because a consumer of a static build must see it
+# too, or it will look for imports that are not there.
+if(WIN32)
+  target_compile_definitions(spill PRIVATE LIBSPILL_BUILD)
+  if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(spill PUBLIC LIBSPILL_STATIC)
+  endif()
+endif()
 
 # The optional HDF5 backend. Off by default: §7b keeps POSIX the default and the
 # only backend that can deliver asynchrony, and HDF5 is here for codes that
@@ -64,8 +84,13 @@ endif()
 # because a consumer of the public header needs none of them.
 target_compile_definitions(spill PRIVATE _GNU_SOURCE)
 
-find_package(Threads REQUIRED)
-target_link_libraries(spill PUBLIC Threads::Threads)
+# Windows threading is SRWLOCK and CONDITION_VARIABLE out of kernel32 -- there
+# is nothing to find and nothing to link, and asking for Threads::Threads there
+# would fail the configure over a dependency that does not exist.
+if(NOT WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(spill PUBLIC Threads::Threads)
+endif()
 
 set_target_properties(spill PROPERTIES
   VERSION   ${PROJECT_VERSION}
@@ -182,6 +207,10 @@ if(LIBSPILL_BUILD_TESTS)
     target_compile_definitions(${t} PRIVATE _GNU_SOURCE)
     add_test(NAME ${t} COMMAND ${t})
   endforeach()
+
+  # test_mapped is entirely about LS_MAPPED, so where the platform has no
+  # mapping it skips rather than fails. Nothing else in the suite is optional.
+  set_tests_properties(test_mapped PROPERTIES SKIP_RETURN_CODE 77)
 
   # Built at both Fortran integer widths; a mismatch is invisible to the
   # toolchain, so it has to be caught here.

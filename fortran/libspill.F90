@@ -292,9 +292,19 @@ contains
     rc = c_unlink_now(s)
   end function ls_unlink_now_f
 
-  ! Every argument below carries an explicit C-matching kind. An ABI binding
-  ! whose dummies are plain `integer` breaks under -fdefault-integer-8 or any
-  ! caller whose default width differs, silently and only for large values.
+  ! Every argument below carries an explicit C-matching kind -- LOGICAL as well
+  ! as INTEGER. An ABI binding whose dummies are plain `integer` breaks under
+  ! -fdefault-integer-8 or any caller whose default width differs, silently and
+  ! only for large values.
+  !
+  ! The logical dummies missed that rule until issue #3: -fdefault-integer-8
+  ! widens LOGICAL from 4 bytes to 8 as well as INTEGER, so an -i8 caller could
+  ! not call ls_exists_f, ls_test_f or ls_store_exists_f at all. That failed
+  ! loudly, being a module procedure, but the workaround -- pinning
+  ! logical(kind=4) at the call site -- would have depended on how LIBSPILL was
+  ! compiled, which no caller can see. They are logical(c_bool) now, so the
+  ! width depends on neither side's flags. -i8 is not a corner case here: eT and
+  ! OpenMolcas both build that way by default.
   function ls_open_f(name, o, err) result(s)
     character(len=*), intent(in) :: name
     type(ls_opts_t), intent(in) :: o
@@ -341,10 +351,10 @@ contains
   function ls_exists_f(s, key, found) result(rc)
     type(c_ptr), intent(in) :: s
     character(len=*), intent(in) :: key
-    logical, intent(out) :: found
+    logical(c_bool), intent(out) :: found
     integer(c_int) :: rc, f
     rc = c_exists(s, cstr(key), f)
-    found = (f /= 0)
+    found = logical(f /= 0, c_bool)
   end function ls_exists_f
 
   function ls_size_f(s, key, nbytes) result(rc)
@@ -392,10 +402,10 @@ contains
 
   function ls_test_f(req, done) result(rc)
     type(c_ptr), intent(in) :: req
-    logical, intent(out) :: done
+    logical(c_bool), intent(out) :: done
     integer(c_int) :: rc, d
     rc = c_test(req, d)
-    done = (d /= 0)
+    done = logical(d /= 0, c_bool)
   end function ls_test_f
 
   function ls_append_f(s, key, nbytes, buf, off) result(rc)
@@ -451,10 +461,10 @@ contains
   function ls_store_exists_f(name, o, found) result(rc)
     character(len=*), intent(in) :: name
     type(ls_opts_t), intent(in) :: o
-    logical, intent(out) :: found
+    logical(c_bool), intent(out) :: found
     integer(c_int) :: rc, f
     rc = c_store_exists(cstr(name), o, f)
-    found = (f /= 0)
+    found = logical(f /= 0, c_bool)
   end function ls_store_exists_f
 
   function ls_strerror_f(err) result(text)

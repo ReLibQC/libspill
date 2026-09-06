@@ -17,7 +17,10 @@ program test_fortran
   integer(c_size_t) :: an
   real(c_double), target :: a(4096), b(4096)
   integer(c_int32_t), target :: meta(2)
-  logical :: found, done
+  ! logical(c_bool), not plain logical: the binding's flags and the caller's
+  ! must not have to agree. Under -fdefault-integer-8 a plain logical is 8
+  ! bytes and would not match (issue #3).
+  logical(c_bool) :: found, done
   integer :: i
   character(len=256) :: dir
 
@@ -51,7 +54,7 @@ program test_fortran
 
   ! ---- table of contents ----
   rc = ls_exists_f(s, 'amps', found)
-  call check(rc == LS_OK .and. found, 'ls_exists_f')
+  call check(rc == LS_OK .and. logical(found), 'ls_exists_f')
   rc = ls_size_f(s, 'amps', n64)
   call check(rc == LS_OK .and. n64 == 8*4096, 'ls_size_f reports bytes')
   rc = ls_reserve_f(s, 'resv', 8192_c_int64_t)
@@ -62,7 +65,7 @@ program test_fortran
   rc = ls_erase_f(s, 'resv')
   call check(rc == LS_OK, 'ls_erase_f')
   rc = ls_exists_f(s, 'resv', found)
-  call check(.not. found, '  ... and it is gone')
+  call check(.not. logical(found), '  ... and it is gone')
 
   ! ---- append ----
   rc = ls_append_f(s, 'stream', int(8*1024, c_size_t), c_loc(a), off)
@@ -128,13 +131,13 @@ program test_fortran
   o = ls_defaults()
   o%exact_name = 1_c_int
   rc = ls_store_exists_f('RUNFILE_F', o, found)
-  call check(rc == LS_OK .and. .not. found, 'ls_store_exists_f on an absent store')
+  call check(rc == LS_OK .and. .not. logical(found), 'ls_store_exists_f on an absent store')
   s = ls_open_f('RUNFILE_F', o, err)
   call check(err == LS_OK, 'an exact-named store opens')
   rc = ls_write_f(s, 'k', 0_c_int64_t, int(8*16, c_size_t), c_loc(a))
   rc = ls_close_f(s, 1_c_int)
   rc = ls_store_exists_f('RUNFILE_F', o, found)
-  call check(rc == LS_OK .and. found, '  ... and ls_store_exists_f then finds it')
+  call check(rc == LS_OK .and. logical(found), '  ... and ls_store_exists_f then finds it')
   s = ls_open_f('RUNFILE_F', o, err)
   b = 0.0d0
   rc = ls_read_f(s, 'k', 0_c_int64_t, int(8*16, c_size_t), c_loc(b))

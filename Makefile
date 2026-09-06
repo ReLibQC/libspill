@@ -95,6 +95,13 @@ fortran/libspill.o: fortran/libspill.F90 include/libspill.h
 tests/test_fortran: tests/test_fortran.F90 $(FORT_OBJ) $(LIB)
 	$(FC) $(FCFLAGS) -o $@ $< $(FORT_OBJ) $(LIB) $(LDLIBS)
 
+# eT and OpenMolcas both build -fdefault-integer-8 by default, so a caller
+# compiled that way against a normally-built module is the ordinary case for
+# this library's audience. Compiling is the whole test -- it is never run.
+# Issue #3 was exactly this combination failing.
+tests/i8_caller.o: tests/i8_caller.F90 fortran/libspill.o
+	$(FC) $(FCFLAGS) -fdefault-integer-8 -c -o $@ $<
+
 
 $(CXX_TEST): tests/test_cxx.cc include/libspill.hpp $(LIB)
 	$(CXX) $(CXXFLAGS) -std=c++20 -o $@ $< $(LIB) $(LDLIBS)
@@ -145,8 +152,9 @@ check-clean:
 check-c: check-clean $(TESTS) $(CXX_TEST)
 	@for t in $(TESTS) $(CXX_TEST); do echo "== $$t"; ./$$t || exit 1; done
 
-check: check-c $(FORT_TEST)
+check: check-c $(FORT_TEST) tests/i8_caller.o
 	@for t in $(FORT_TEST); do echo "== $$t"; ./$$t || exit 1; done
+	@echo "== -fdefault-integer-8 caller"; echo "  compiles against the default-built module"
 	@echo "== python binding"; $(MAKE) --no-print-directory check-python
 	@echo "== install and consume"; $(MAKE) --no-print-directory check-install
 
@@ -154,7 +162,7 @@ bench: $(BENCH)
 
 clean:
 	rm -f $(OBJ) $(DEP) $(LIB) $(SO) $(TESTS) $(BENCH) \
-	      $(FORT_OBJ) $(FORT_TEST) fortran/*.mod $(CXX_TEST)
+	      $(FORT_OBJ) $(FORT_TEST) fortran/*.mod $(CXX_TEST) tests/i8_caller.o
 
 -include $(DEP)
 

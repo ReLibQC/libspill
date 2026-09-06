@@ -78,6 +78,17 @@ the C suite, the C++ layer, the Fortran binding, the Python binding, the four
 port shims, the packaging check, and the Psi4 header-conformance build. It
 skips what is not available (numpy, a Psi4 tree, cmake) rather than failing.
 
+### `-fdefault-integer-8`
+
+Supported, and tested: `tests/i8_caller.F90` is compiled with
+`-fdefault-integer-8` against a module built *without* it, exercising every
+entry point, as part of `make check`. eT and OpenMolcas both default to `-i8`,
+so that combination is the ordinary case here rather than an exotic one.
+
+Declare flag arguments as `logical(c_bool)`, not plain `logical` — `-i8` widens
+`LOGICAL` as well as `INTEGER`, so a plain `logical` is 8 bytes in your build
+and 4 in a default-built libspill.
+
 ### Fortran builds that do not order module compilation
 
 `use libspill` needs `libspill.mod` to exist before the file that uses it is
@@ -145,7 +156,7 @@ The C header is the ABI and the stable surface. Nothing else is.
 |---|---|---|
 | C | `libspill.h` | the ABI; see §4b of DESIGN.md for the contract |
 | C++ | `libspill.hpp` | header-only, C++20. RAII, spans, exceptions, typed `accumulate` |
-| Fortran | `use libspill` | `ISO_C_BINDING`; every dummy carries an explicit C-matching kind. **If your build does not order Fortran compilation, bind the C ABI instead** — see below |
+| Fortran | `use libspill` | `ISO_C_BINDING`; every dummy carries an explicit C-matching kind, `logical(c_bool)` included, so `-fdefault-integer-8` callers work against a default-built module. **If your build does not order Fortran compilation, bind the C ABI instead** — see below |
 | Python | `python/libspill.py` | ctypes over the ABI, NumPy throughout; needs no compiler |
 
 ```cpp

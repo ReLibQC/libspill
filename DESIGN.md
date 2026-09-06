@@ -1426,6 +1426,28 @@ permanent test rather than deleting it once it had proved the point, which is
 the right instinct: the next added field re-arms the trap for anyone mirroring
 the latest layout.
 
+**A fourth correction, from the eT conformance shim: the explicit-kind rule
+stopped at INTEGER.** The Fortran binding's own comment says every dummy carries
+an explicit C-matching kind because a plain one "breaks under
+-fdefault-integer-8 or any caller whose default width differs". Every *integer*
+dummy honoured that. The three *logical* ones did not — and
+`-fdefault-integer-8` widens `LOGICAL` from 4 bytes to 8 as well, so an `-i8`
+caller could not call `ls_exists_f`, `ls_test_f` or `ls_store_exists_f` at all.
+
+This failed loudly, being a module procedure with a real interface, so nothing
+was miscomputed — better than the silent-truncation case §6e records. What made
+it worth fixing anyway is the workaround: pinning `logical(kind=4)` at the call
+site would have made the caller's code depend on **how libspill itself was
+compiled**, which no caller can see. That is precisely the fragility the
+explicit-kind rule exists to prevent, reappearing one type over. They are
+`logical(c_bool)` now.
+
+The systemic answer is `tests/i8_caller.F90`: a caller compiled
+`-fdefault-integer-8` against a module built without it, touching every entry
+point, compiled as part of `make check` and never run — compiling *is* the test.
+**`-i8` is not a corner case for this audience.** eT and OpenMolcas both default
+to it, so that combination is the ordinary one and had no coverage at all.
+
 **`ls_unlink_now` came out of this.** qp2 unlinks its anonymous mappings the
 moment they exist, so a crash leaves nothing behind; the session reproduced that
 by rebuilding libspill's path and unlinking it, which works but reaches into a

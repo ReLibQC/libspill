@@ -74,7 +74,13 @@ int ls_os_getpid(void) { return (int)getpid(); }
 int ls_os_zero_range(int fd, uint64_t off, uint64_t len)
 {
 #ifdef FALLOC_FL_ZERO_RANGE
-    return fallocate(fd, FALLOC_FL_ZERO_RANGE, (off_t)off, (off_t)len);
+    /* FALLOC_FL_KEEP_SIZE because this must never extend the file: a single
+     * FALLOC_FL_ZERO_RANGE call asked to zero and extend at once was observed
+     * on ext4 to extend it, report success, and leave the bytes below the old
+     * end of file untouched. The caller extends separately, and only hands us
+     * a range that is already inside the file. */
+    return fallocate(fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE,
+                     (off_t)off, (off_t)len);
 #else
     (void)fd; (void)off; (void)len;
     errno = ENOSYS;

@@ -45,7 +45,7 @@ SO   := libspill.so
 
 TESTS := tests/abi_header_test tests/test_posix tests/churn_libspill \
          tests/test_surveyed tests/test_crayio tests/test_crayio_i8 tests/test_mapped \
-         tests/test_exact_name \
+         tests/test_exact_name tests/test_reopen \
          tests/test_hdf5
 BENCH := bench/ooc_bench
 

@@ -79,7 +79,9 @@ int      ls_os_path_size(const char *path, uint64_t *size);  /* same, by name */
 int      ls_os_unlink(const char *path);
 int      ls_os_getpid(void);
 
-/* Punch a zeroed range without writing it, where the platform can. Returns 0 on
+/* Punch a zeroed range without writing it, where the platform can. The range
+ * must lie wholly inside the file: this never extends it, and a caller that
+ * needs the file longer must say so with ls_os_ftruncate first. Returns 0 on
  * success, -1 if unsupported or refused -- the caller then writes zeros, which
  * is always correct and merely slower. */
 int      ls_os_zero_range(int fd, uint64_t off, uint64_t len);

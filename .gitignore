@@ -24,6 +24,7 @@ tests/test_crayio_i8
 tests/test_cxx
 tests/test_mapped
 tests/test_exact_name
+tests/test_reopen
 tests/test_hdf5
 bench/ooc_bench
 python/__pycache__/

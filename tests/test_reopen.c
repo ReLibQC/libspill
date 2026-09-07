@@ -14,10 +14,12 @@
  * The offsets below are the ones the original random reproducer failed on: the
  * third cycle's write is what first needs a tail extent over the old ToC.
  */
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include "libspill.h"
 
@@ -124,6 +126,79 @@ int main(void)
     s = ls_open("reopen", &o, &err);
     ok(s != NULL && intact(s, "final reopen"), "the store survives three reopens");
     if (s) ls_close(s, 0);
+
+    /* Issue #8: the same keep-close under O_DIRECT could not be reopened. The
+     * superblock did not record the ToC's length, so the reader took it to be
+     * everything from the ToC offset to the end of the file -- true only when
+     * the write lands exactly at the end, which O_DIRECT breaks by padding up
+     * to the block size. The CRC was then computed over the padding and never
+     * matched. Nothing here fails where the filesystem refuses O_DIRECT and
+     * the library falls back to buffered I/O, tmpfs being the common case. */
+    {
+        static unsigned char big[8192], got[8192];
+        char path[512];
+        size_t i;
+
+        for (i = 0; i < sizeof big; i++) big[i] = (unsigned char)(i * 7u);
+
+        ls_opts_default(&o);
+        o.dir = dir();
+        o.direct_io = 1;
+        o.exact_name = 1;              /* so the check below can find the file */
+
+        s = ls_open("reopen_dio", &o, &err);
+        ok(s != NULL, "a direct_io store opens");
+        if (s) {
+            ok(ls_write(s, "k", 0, sizeof big, big) == LS_OK, "  ... writes");
+            ok(ls_close(s, 1) == LS_OK, "  ... keep-closes");
+
+            s = ls_open("reopen_dio", &o, &err);
+            ok(s != NULL, "  ... and reopens");
+            if (s) {
+                memset(got, 0, sizeof got);
+                ok(ls_read(s, "k", 0, sizeof got, got) == LS_OK &&
+                   memcmp(got, big, sizeof big) == 0, "  ... with its bytes intact");
+                ls_close(s, 1);
+            }
+        }
+
+        /* A store written before the length was recorded leaves that field
+         * zero and must still open, by the old inference. Blank it by hand:
+         * the fallback has no other way to be exercised, and silently losing
+         * it would strand every store written up to now. It has to be a
+         * buffered store -- the inference was only ever right when nothing
+         * padded the ToC, which is the whole of issue #8. */
+        ls_opts_default(&o);
+        o.dir = dir();
+        o.exact_name = 1;
+        s = ls_open("reopen_old", &o, &err);
+        if (s) { ls_write(s, "k", 0, sizeof big, big); ls_close(s, 1); }
+
+        snprintf(path, sizeof path, "%s/reopen_old", dir());
+        {
+            unsigned char zero[8] = { 0 };
+            int fd = open(path, O_RDWR);
+            ok(fd >= 0 && pwrite(fd, zero, sizeof zero, 48) == (ssize_t)sizeof zero,
+               "blank the recorded ToC length, as a pre-#8 store has it");
+            if (fd >= 0) close(fd);
+        }
+        s = ls_open("reopen_old", &o, &err);
+        ok(s != NULL, "  ... and such a store still opens");
+        if (s) {
+            memset(got, 0, sizeof got);
+            ok(ls_read(s, "k", 0, sizeof got, got) == LS_OK &&
+               memcmp(got, big, sizeof big) == 0, "  ... with its bytes intact");
+            ls_close(s, 0);
+        }
+
+        /* The direct_io store from above is still on disk; take it away. */
+        ls_opts_default(&o);
+        o.dir = dir();
+        o.direct_io = 1;
+        o.exact_name = 1;
+        s = ls_open("reopen_dio", &o, &err);
+        if (s) ls_close(s, 0);
+    }
 
     printf("%d checks, %d failed\n", ntest, fails);
     return fails != 0;

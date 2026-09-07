@@ -2,7 +2,24 @@
 /* Store lifecycle, and the on-disk superblock that makes keep=1 mean something.
  * Restart is out of scope (DESIGN.md §3): the persisted table of contents
  * exists so a scratch file can be inspected and reopened while debugging a
- * port, not so a job can resume from one. */
+ * port, not so a job can resume from one.
+ *
+ * The superblock is LS_SUPER_SIZE bytes at offset 0, little-endian, and the
+ * rest of it is zero. Written by ls_close, read by ls_open, and worth having
+ * in one place: the two used to be read side by side to work out what was
+ * where, which is how the ToC length came to be inferred rather than recorded
+ * (issue #8).
+ *
+ *    0   8   magic
+ *    8   4   LS_FMT_VERSION
+ *   12   4   zero
+ *   16   8   ToC offset in the file, always equal to file_end
+ *   24   8   number of records the ToC holds
+ *   32   8   file_end: the first byte past the last extent
+ *   40   4   CRC32 of the ToC bytes
+ *   48   8   ToC length in bytes; zero in a store written before it was
+ *            recorded, and then it is inferred as the rest of the file
+ */
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -387,12 +404,18 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
             uint64_t toc_off = get64(sb + 16), toc_n = get64(sb + 24);
             uint64_t fend = get64(sb + 32);
             uint32_t crc = get32(sb + 40);
-            uint64_t tlen = fsize - toc_off;
+            uint64_t tlen = get64(sb + 48);
             unsigned char *tb;
 
             if (toc_off < LS_SUPER_SIZE || toc_off > fsize) {
                 rc = LS_ERR_CORRUPT; goto fail;
             }
+            /* A store written before the length was recorded leaves that field
+             * zero, and for those the old inference is still right: nothing
+             * padded the ToC, because O_DIRECT was the only thing that did and
+             * it could not reopen its own stores at all. */
+            if (tlen == 0) tlen = fsize - toc_off;
+            if (tlen > fsize - toc_off) { rc = LS_ERR_CORRUPT; goto fail; }
             s->file_end = fend;
             tb = malloc(tlen ? (size_t)tlen : 1);
             if (!tb) { rc = -ENOMEM; goto fail; }
@@ -496,6 +519,13 @@ int ls_close(ls_store *s, int keep)
             put64(sb + 24, (uint64_t)s->nrec);
             put64(sb + 32, s->file_end);
             put32(sb + 40, crc32_of(tb, tn));
+            /* The ToC's length in bytes. It used to be inferred from the file
+             * size, which is only right when the ToC write lands exactly at
+             * the end of the file: under O_DIRECT it is padded up to the block
+             * size, so the reader inferred the padding as ToC and the CRC over
+             * it never matched (issue #8). Recording it makes the superblock
+             * say what is there rather than leaving the reader to deduce it. */
+            put64(sb + 48, (uint64_t)tn);
             rc = ls_pwrite_all(s, tb, tn, s->file_end);
             if (rc == LS_OK) rc = ls_pwrite_all(s, sb, LS_SUPER_SIZE, 0);
             /* Only if the caller asked. See durable_close in libspill.h:

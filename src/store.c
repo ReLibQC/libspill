@@ -98,39 +98,47 @@ int ls_pwrite_all(ls_store *s, const void *buf, size_t n, uint64_t off)
  * zero, but a reused hole holds whatever the previous record left there, and
  * §4b promises reserved space and write gaps read as zero.
  *
- * Only the part of the range that lies inside the file can hold stale bytes;
- * past the end there is nothing to erase, and a gap left behind by a later
- * write reads as zero by POSIX. Clamping to the current size is not just an
- * optimisation. A single FALLOC_FL_ZERO_RANGE call asked to both zero and
- * extend was observed on ext4 to extend the file, report success, and leave
- * the bytes below the old end of file untouched -- which is precisely where
- * the previous ls_close wrote its table of contents, so a tail extent handed
- * out over that ToC served its bytes back to the caller as data. Never let
- * one call do both jobs. */
+ * Only bytes already inside the file can be stale; past the end there is
+ * nothing to erase. Splitting the range on the end of file is not an
+ * optimisation. A single FALLOC_FL_ZERO_RANGE call asked to zero and extend at
+ * once was observed on ext4 to extend the file, report success, and leave the
+ * bytes below the old end of file untouched -- which is exactly where the
+ * previous ls_close wrote its table of contents, so a tail extent handed out
+ * over that ToC served its bytes back to the caller as data (issue #7). Never
+ * let one call do both jobs.
+ *
+ * The file still has to reach the end of the range, because ls_reserve lets a
+ * caller read space it never wrote. Extending with one zero byte at the last
+ * offset rather than a truncate is deliberate: the byte lies inside the extent
+ * being zeroed, so no other thread can own it, and unlike ftruncate -- or
+ * _chsize_s, which zero-fills as it goes -- it cannot cut back a file another
+ * thread has already grown. Reads and writes run outside toc_lk on purpose, so
+ * a truncate here is not serialised against them. */
 static int zero_range(ls_store *s, uint64_t off, uint64_t len)
 {
     static const size_t CH = 1u << 20;
     unsigned char *z;
     int rc = LS_OK;
-    uint64_t old_end;
+    uint64_t end, inside;
 
-    if (ls_os_file_size(s->fd, &old_end) != 0) return -errno;
-
-    /* Extending is the first job: the new tail is a hole, so it reads as zero
-     * without anything being written, and ls_reserve depends on the file
-     * actually reaching that far. */
-    if (off + len > old_end && ls_os_ftruncate(s->fd, off + len) != 0)
-        return -errno;
-
-    /* Erasing is the second job, and only what was already inside the file can
-     * need it. ls_os_zero_range is documented to be handed a range that is
-     * wholly inside the file, which is what makes it safe to use here. */
-    if (off >= old_end) return LS_OK;
-    if (len > old_end - off) len = old_end - off;
     if (len == 0) return LS_OK;
 
-    if (!s->direct && ls_os_zero_range(s->fd, off, len) == 0)
-        return LS_OK;
+    /* O_DIRECT has always written its zeros: the zeroing primitive is a page
+     * cache operation and mixing the two is not worth the reasoning. */
+    if (!s->direct) {
+        if (ls_os_file_size(s->fd, &end) != 0) return -errno;
+        inside = (off >= end) ? 0 : (len > end - off ? end - off : len);
+
+        if (inside == 0 || ls_os_zero_range(s->fd, off, inside) == 0) {
+            unsigned char zb = 0;
+            if (off + len <= end) return LS_OK;
+            return ls_pwrite_all(s, &zb, 1, off + len - 1);
+        }
+    }
+
+    /* No zeroing primitive, or it refused: write the zeros over the whole
+     * range, which extends the file as a side effect. This is what every
+     * platform without one has always done, so it is the well-trodden path. */
     z = ls_os_aligned_alloc(LS_ALIGN, CH);
     if (!z) return -ENOMEM;
     memset(z, 0, CH);

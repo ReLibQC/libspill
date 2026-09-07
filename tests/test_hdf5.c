@@ -6,6 +6,7 @@
  * checked -- and that §7b's reason for keeping HDF5 optional still holds, by
  * running the same churn protocol through both and comparing.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,9 +36,11 @@ static void ok_rc(int rc, int want, const char *what)
     }
 }
 
-static unsigned long rs = 1;
-static unsigned long nextr(void) { rs = rs * 6364136223846793005UL + 1442695040888963407UL;
-                                   return (rs >> 33); }
+/* A 64-bit LCG, so it must say so: unsigned long is 32 bits on Windows, where
+ * the constants would truncate and rs >> 33 is undefined. */
+static uint64_t rs = 1;
+static uint64_t nextr(void) { rs = rs * 6364136223846793005ULL + 1442695040888963407ULL;
+                              return (rs >> 33); }
 
 /* The protocol of tests/churn_libspill.c and tests/hdf5_churn_varsize.py:
  * 8 records, 60 cycles, each recreated at a different random size. */

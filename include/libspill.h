@@ -23,8 +23,19 @@ extern "C" {
  * not the same as encapsulating them: without this, ls_rw, ls_toc_find,
  * ls_pool_start and thirty others would be linkable -- and therefore, in
  * practice, part of the ABI we promised to keep. */
+/* On Windows the same intent needs the opposite default: nothing is exported
+ * from a DLL unless it is marked, so LS_API has to be the mark. LIBSPILL_BUILD
+ * is defined by this library's own build (see CMakeLists.txt) and by nothing
+ * else, which is what makes the same declaration mean "export" here and
+ * "import" in a consumer. A static build defines neither and wants neither. */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#  define LS_API
+#  if defined(LIBSPILL_STATIC)
+#    define LS_API
+#  elif defined(LIBSPILL_BUILD)
+#    define LS_API __declspec(dllexport)
+#  else
+#    define LS_API __declspec(dllimport)
+#  endif
 #elif defined(__GNUC__) && (__GNUC__ >= 4)
 #  define LS_API __attribute__((visibility("default")))
 #else
@@ -182,7 +193,7 @@ typedef struct {
  * header keeps working against a newer library. Always obtain an ls_opts from
  * ls_opts_default rather than declaring one and filling it in. */
 
-LS_API /* Fills o with defaults. Call it through the ls_opts_default macro below, which
+/* Fills o with defaults. Call it through the ls_opts_default macro below, which
  * passes the version YOUR header declares -- the library then writes only the
  * fields that version defines, so linking a newer libspill against a struct
  * compiled from an older header cannot write past its end. */

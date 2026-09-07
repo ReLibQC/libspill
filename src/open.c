@@ -4,14 +4,10 @@
  * exists so a scratch file can be inspected and reopened while debugging a
  * port, not so a job can resume from one. */
 #include <errno.h>
-#include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "internal.h"
 
@@ -89,30 +85,30 @@ static int resolve_rank(int rank)
             if (r >= 0) return (int)r;
         }
     }
-    return (int)getpid();          /* never collides on a node; §4b */
+    return ls_os_getpid();         /* never collides on a node; §4b */
 }
 
 static char *build_path(const char *name, const ls_opts *o)
 {
     const char *dir = o->dir;
+    char tmp[512];
     char *p;
     size_t n;
 
-    if (!dir) dir = getenv("TMPDIR");
-    if (!dir || !*dir) dir = "/tmp";
+    if (!dir || !*dir) { ls_os_tmpdir(tmp, sizeof tmp); dir = tmp; }
 
     n = strlen(dir) + strlen(name) + 64;
     p = malloc(n);
     if (!p) return NULL;
 
     if (o->exact_name)
-        snprintf(p, n, "%s/%s", dir, name);
+        snprintf(p, n, "%s" LS_PATH_SEP "%s", dir, name);
     /* LS_SHARED deliberately does NOT fold in the rank: every process must
      * name the same file. */
     else if (o->parallel == LS_PER_RANK)
-        snprintf(p, n, "%s/%s.r%d.libspill", dir, name, resolve_rank(o->rank));
+        snprintf(p, n, "%s" LS_PATH_SEP "%s.r%d.libspill", dir, name, resolve_rank(o->rank));
     else
-        snprintf(p, n, "%s/%s.libspill", dir, name);
+        snprintf(p, n, "%s" LS_PATH_SEP "%s.libspill", dir, name);
     return p;
 }
 
@@ -120,7 +116,7 @@ int ls_store_exists(const char *name, const ls_opts *opts, int *found)
 {
     ls_opts o;
     char *path;
-    struct stat st;
+    uint64_t sz;
 
     if (!name || !*name || !found) return LS_ERR_INVAL;
     ls_opts_init(&o, LS_OPTS_VERSION);
@@ -132,7 +128,7 @@ int ls_store_exists(const char *name, const ls_opts *opts, int *found)
     }
     path = build_path(name, &o);
     if (!path) return -ENOMEM;
-    *found = (stat(path, &st) == 0 && st.st_size > 0);
+    *found = (ls_os_path_size(path, &sz) == 0 && sz > 0);
     free(path);
     return LS_OK;
 }
@@ -269,7 +265,7 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
 {
     ls_opts o;
     ls_store *s;
-    struct stat st;
+    uint64_t fsize = 0;
     int rc = LS_OK;
 
     if (err) *err = LS_OK;
@@ -299,6 +295,15 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
         if (err) *err = LS_ERR_INVAL;
         return NULL;
     }
+#ifndef LS_HAVE_MMAP
+    /* No mapping on this platform (see os.h). Refused here, once, so that
+     * ls_map and ls_unmap can never be reached with a mapped store and every
+     * other mode is unaffected. */
+    if (o.mode == LS_MAPPED) {
+        if (err) *err = LS_ERR_MODE;
+        return NULL;
+    }
+#endif
     /* A per-process memory tier would keep writes where the other processes
      * cannot see them. In a shared store that is a correctness failure, not a
      * tuning choice, so it is refused rather than ignored. */
@@ -341,44 +346,35 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
 
 #ifdef LIBSPILL_HAVE_HDF5
     if (o.backend == LS_HDF5) {
-        struct stat hst;
-        int existing = (stat(s->path, &hst) == 0 && hst.st_size > 0);
-        pthread_mutex_init(&s->toc_lk, NULL);
-        pthread_mutex_init(&s->alloc_lk, NULL);
-        pthread_mutex_init(&s->q_lk, NULL);
-        pthread_cond_init(&s->q_cv, NULL);
+        uint64_t hsize;
+        int existing = (ls_os_path_size(s->path, &hsize) == 0 && hsize > 0);
+        ls_mutex_init(&s->toc_lk);
+        ls_mutex_init(&s->alloc_lk);
+        ls_mutex_init(&s->q_lk);
+        ls_cond_init(&s->q_cv);
         rc = ls_h5_open(s, s->path, existing);
         if (rc != LS_OK) goto fail;
         return s;
     }
 #endif
-    pthread_mutex_init(&s->toc_lk, NULL);
-    pthread_mutex_init(&s->alloc_lk, NULL);
-    pthread_mutex_init(&s->q_lk, NULL);
-    pthread_cond_init(&s->q_cv, NULL);
+    ls_mutex_init(&s->toc_lk);
+    ls_mutex_init(&s->alloc_lk);
+    ls_mutex_init(&s->q_lk);
+    ls_cond_init(&s->q_cv);
 
     {
-        int flags = O_RDWR | O_CREAT;
-#ifdef O_DIRECT
-        if (o.direct_io) flags |= O_DIRECT;
-#endif
-        s->fd = open(s->path, flags, 0600);
-#ifdef O_DIRECT
-        if (s->fd < 0 && o.direct_io) {         /* filesystem may refuse it */
-            s->fd = open(s->path, O_RDWR | O_CREAT, 0600);
-            if (s->fd >= 0)
-                ls_report(s, LS_OK, NULL, 0, 0, "O_DIRECT unavailable; using buffered I/O");
-        } else if (s->fd >= 0 && o.direct_io) {
-            s->direct = 1;
-        }
-#endif
+        int got_direct = 0;
+        s->fd = ls_os_open_rw(s->path, o.direct_io, &got_direct);
         if (s->fd < 0) { rc = -errno; goto fail; }
+        if (o.direct_io && !got_direct)
+            ls_report(s, LS_OK, NULL, 0, 0, "uncached I/O unavailable; using buffered I/O");
+        s->direct = got_direct;
     }
 
-    if (fstat(s->fd, &st) != 0) { rc = -errno; goto fail; }
+    if (ls_os_file_size(s->fd, &fsize) != 0) { rc = -errno; goto fail; }
     s->file_end = LS_SUPER_SIZE;
 
-    if (st.st_size >= (off_t)LS_SUPER_SIZE) {
+    if (fsize >= (uint64_t)LS_SUPER_SIZE) {
         unsigned char sb[LS_SUPER_SIZE];
         rc = ls_pread_all(s, sb, LS_SUPER_SIZE, 0);
         if (rc != LS_OK) goto fail;
@@ -390,10 +386,10 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
             uint64_t toc_off = get64(sb + 16), toc_n = get64(sb + 24);
             uint64_t fend = get64(sb + 32);
             uint32_t crc = get32(sb + 40);
-            uint64_t tlen = (uint64_t)st.st_size - toc_off;
+            uint64_t tlen = fsize - toc_off;
             unsigned char *tb;
 
-            if (toc_off < LS_SUPER_SIZE || toc_off > (uint64_t)st.st_size) {
+            if (toc_off < LS_SUPER_SIZE || toc_off > fsize) {
                 rc = LS_ERR_CORRUPT; goto fail;
             }
             s->file_end = fend;
@@ -407,7 +403,7 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
             rc = rebuild_free_list(s);
             if (rc != LS_OK) goto fail;
         }
-    } else if (st.st_size > 0) {
+    } else if (fsize > 0) {
         rc = LS_ERR_CORRUPT;
         goto fail;
     } else if (o.parallel == LS_SHARED) {
@@ -416,7 +412,7 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
          * saying so is better than opening an empty store that fails later. */
         rc = -ENOENT;
         goto fail;
-    } else if (ftruncate(s->fd, (off_t)LS_SUPER_SIZE) != 0) {
+    } else if (ls_os_ftruncate(s->fd, LS_SUPER_SIZE) != 0) {
         rc = -errno;
         goto fail;
     }
@@ -429,7 +425,7 @@ ls_store *ls_open(const char *name, const ls_opts *opts, int *err)
 fail:
     if (err) *err = rc;
     if (s) {
-        if (s->fd >= 0) close(s->fd);
+        if (s->fd >= 0) ls_os_close(s->fd);
         free(s->tab);
         free(s->path);
         free(s);
@@ -441,7 +437,7 @@ int ls_unlink_now(ls_store *s)
 {
     if (!s) return LS_ERR_INVAL;
     if (!s->path) return LS_OK;               /* already unlinked */
-    if (unlink(s->path) != 0 && errno != ENOENT) {
+    if (ls_os_unlink(s->path) != 0 && errno != ENOENT) {
         int rc = -errno;
         ls_report(s, rc, NULL, 0, 0, "unlink_now");
         return rc;
@@ -464,11 +460,11 @@ int ls_close(ls_store *s, int keep)
 #ifdef LIBSPILL_HAVE_HDF5
     if (s->o.backend == LS_HDF5) {
         int hrc = ls_h5_close(s);
-        if (!keep && s->path) unlink(s->path);
-        pthread_mutex_destroy(&s->toc_lk);
-        pthread_mutex_destroy(&s->alloc_lk);
-        pthread_mutex_destroy(&s->q_lk);
-        pthread_cond_destroy(&s->q_cv);
+        if (!keep && s->path) ls_os_unlink(s->path);
+        ls_mutex_destroy(&s->toc_lk);
+        ls_mutex_destroy(&s->alloc_lk);
+        ls_mutex_destroy(&s->q_lk);
+        ls_cond_destroy(&s->q_cv);
         free(s->tab);
         free(s->path);
         free(s);
@@ -501,7 +497,7 @@ int ls_close(ls_store *s, int keep)
             put32(sb + 40, crc32_of(tb, tn));
             rc = ls_pwrite_all(s, tb, tn, s->file_end);
             if (rc == LS_OK) rc = ls_pwrite_all(s, sb, LS_SUPER_SIZE, 0);
-            if (rc == LS_OK && fsync(s->fd) != 0) rc = -errno;
+            if (rc == LS_OK && ls_os_fsync(s->fd) != 0) rc = -errno;
         }
         free(tb);
         if (first == LS_OK) first = rc;
@@ -512,13 +508,13 @@ int ls_close(ls_store *s, int keep)
         ls_rec *r = s->tab[i];
         while (r) { ls_rec *nx = r->hnext; ls_rec_free(s, r); r = nx; }
     }
-    if (s->fd >= 0) close(s->fd);
-    if (!keep && s->path) unlink(s->path);
+    if (s->fd >= 0) ls_os_close(s->fd);
+    if (!keep && s->path) ls_os_unlink(s->path);
 
-    pthread_mutex_destroy(&s->toc_lk);
-    pthread_mutex_destroy(&s->alloc_lk);
-    pthread_mutex_destroy(&s->q_lk);
-    pthread_cond_destroy(&s->q_cv);
+    ls_mutex_destroy(&s->toc_lk);
+    ls_mutex_destroy(&s->alloc_lk);
+    ls_mutex_destroy(&s->q_lk);
+    ls_cond_destroy(&s->q_cv);
     for (i = 0; i < s->nretired; i++) free(s->retired[i]);
     free(s->retired);
     free(s->fl);

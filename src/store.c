@@ -4,26 +4,18 @@
  * what makes the free-list reuse ours to control, and it sidesteps the
  * many-small-datasets problem §7b flags for HDF5. */
 #include <errno.h>
-#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "internal.h"
 
-/* ------------------------------------------------------------- raw file I/O */
+#ifdef LS_HAVE_MMAP           /* LS_HAVE_MMAP comes from os.h, via internal.h */
+#include <sys/mman.h>
+#endif
 
-static void *aligned_alloc_or_null(size_t n)
-{
-    void *p = NULL;
-    if (posix_memalign(&p, LS_ALIGN, n) != 0) return NULL;
-    return p;
-}
+/* ------------------------------------------------------------- raw file I/O */
 
 /* Retries short transfers, so the data calls are all-or-nothing to the caller
  * as §4b promises. Under O_DIRECT everything is staged through an aligned
@@ -49,9 +41,9 @@ static int rw_all(ls_store *s, void *buf, const void *cbuf, size_t n,
          (off & (uint64_t)(LS_ALIGN - 1)) == 0 &&
          (n   & (size_t)(LS_ALIGN - 1)) == 0)) {
         while (done < n) {
-            ssize_t r = is_write
-                ? pwrite(s->fd, cp + done, n - done, (off_t)(off + done))
-                : pread (s->fd, p  + done, n - done, (off_t)(off + done));
+            int64_t r = is_write
+                ? ls_os_pwrite(s->fd, cp + done, n - done, off + done)
+                : ls_os_pread (s->fd, p  + done, n - done, off + done);
             if (r < 0) { if (errno == EINTR) continue; return -errno; }
             if (r == 0) return is_write ? -ENOSPC : -EIO;
             done += (size_t)r;
@@ -60,7 +52,7 @@ static int rw_all(ls_store *s, void *buf, const void *cbuf, size_t n,
     }
 
     {   /* O_DIRECT: offset, length and buffer must all be LS_ALIGN-aligned */
-        unsigned char *bb = aligned_alloc_or_null(LS_BOUNCE);
+        unsigned char *bb = ls_os_aligned_alloc(LS_ALIGN, LS_BOUNCE);
         int rc = LS_OK;
         if (!bb) return -ENOMEM;
 
@@ -70,28 +62,28 @@ static int rw_all(ls_store *s, void *buf, const void *cbuf, size_t n,
             size_t   skew  = (size_t)(abs - base);
             size_t   chunk = n - done;
             size_t   span;
-            ssize_t  r;
+            int64_t  r;
 
             if (chunk > LS_BOUNCE - skew) chunk = LS_BOUNCE - skew;
             span = (skew + chunk + LS_ALIGN - 1) & ~(size_t)(LS_ALIGN - 1);
 
             if (is_write) {
                 if (skew || span != skew + chunk) {     /* read-modify-write */
-                    r = pread(s->fd, bb, span, (off_t)base);
+                    r = ls_os_pread(s->fd, bb, span, base);
                     if (r < 0) { rc = -errno; break; }
                     if ((size_t)r < span) memset(bb + r, 0, span - (size_t)r);
                 }
                 memcpy(bb + skew, cp + done, chunk);
-                r = pwrite(s->fd, bb, span, (off_t)base);
+                r = ls_os_pwrite(s->fd, bb, span, base);
             } else {
-                r = pread(s->fd, bb, span, (off_t)base);
+                r = ls_os_pread(s->fd, bb, span, base);
                 if (r >= 0 && (size_t)r < span) memset(bb + r, 0, span - (size_t)r);
                 if (r >= 0) memcpy(p + done, bb + skew, chunk);
             }
             if (r < 0) { rc = (errno == EINTR) ? LS_OK : -errno; if (rc) break; continue; }
             done += chunk;
         }
-        free(bb);
+        ls_os_aligned_free(bb);
         return rc;
     }
 }
@@ -106,47 +98,48 @@ int ls_pwrite_all(ls_store *s, const void *buf, size_t n, uint64_t off)
  * zero, but a reused hole holds whatever the previous record left there, and
  * §4b promises reserved space and write gaps read as zero.
  *
- * Only the part of the range that lies inside the file can hold stale bytes;
- * past the end there is nothing to erase, and a gap left behind by a later
- * write reads as zero by POSIX. Clamping to the current size is not just an
- * optimisation. A single FALLOC_FL_ZERO_RANGE call asked to both zero and
- * extend was observed on ext4 to extend the file, report success, and leave
- * the bytes below the old end of file untouched -- which is precisely where
- * the previous ls_close wrote its table of contents, so a tail extent handed
- * out over that ToC served its bytes back to the caller as data. Never let
- * one call do both jobs. */
+ * Only bytes already inside the file can be stale; past the end there is
+ * nothing to erase. Splitting the range on the end of file is not an
+ * optimisation. A single FALLOC_FL_ZERO_RANGE call asked to zero and extend at
+ * once was observed on ext4 to extend the file, report success, and leave the
+ * bytes below the old end of file untouched -- which is exactly where the
+ * previous ls_close wrote its table of contents, so a tail extent handed out
+ * over that ToC served its bytes back to the caller as data (issue #7). Never
+ * let one call do both jobs.
+ *
+ * The file still has to reach the end of the range, because ls_reserve lets a
+ * caller read space it never wrote. Extending with one zero byte at the last
+ * offset rather than a truncate is deliberate: the byte lies inside the extent
+ * being zeroed, so no other thread can own it, and unlike ftruncate -- or
+ * _chsize_s, which zero-fills as it goes -- it cannot cut back a file another
+ * thread has already grown. Reads and writes run outside toc_lk on purpose, so
+ * a truncate here is not serialised against them. */
 static int zero_range(ls_store *s, uint64_t off, uint64_t len)
 {
     static const size_t CH = 1u << 20;
     unsigned char *z;
     int rc = LS_OK;
-    struct stat zst;
-    uint64_t old_end;
+    uint64_t end, inside;
 
-    if (fstat(s->fd, &zst) != 0) return -errno;
-    old_end = (uint64_t)zst.st_size;
-
-    /* Extending is the first job: the new tail is a hole, so it reads as zero
-     * without anything being written, and ls_reserve depends on the file
-     * actually reaching that far. */
-    if (off + len > old_end && ftruncate(s->fd, (off_t)(off + len)) != 0)
-        return -errno;
-
-    /* Erasing is the second job, and only what was already inside the file can
-     * need it. */
-    if (off >= old_end) return LS_OK;
-    if (len > old_end - off) len = old_end - off;
     if (len == 0) return LS_OK;
 
-#ifdef FALLOC_FL_ZERO_RANGE
-    /* The range is now wholly inside the file, so this cannot extend it;
-     * FALLOC_FL_KEEP_SIZE says so to the kernel as well as to the reader. */
-    if (!s->direct &&
-        fallocate(s->fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE,
-                  (off_t)off, (off_t)len) == 0)
-        return LS_OK;
-#endif
-    z = aligned_alloc_or_null(CH);
+    /* O_DIRECT has always written its zeros: the zeroing primitive is a page
+     * cache operation and mixing the two is not worth the reasoning. */
+    if (!s->direct) {
+        if (ls_os_file_size(s->fd, &end) != 0) return -errno;
+        inside = (off >= end) ? 0 : (len > end - off ? end - off : len);
+
+        if (inside == 0 || ls_os_zero_range(s->fd, off, inside) == 0) {
+            unsigned char zb = 0;
+            if (off + len <= end) return LS_OK;
+            return ls_pwrite_all(s, &zb, 1, off + len - 1);
+        }
+    }
+
+    /* No zeroing primitive, or it refused: write the zeros over the whole
+     * range, which extends the file as a side effect. This is what every
+     * platform without one has always done, so it is the well-trodden path. */
+    z = ls_os_aligned_alloc(LS_ALIGN, CH);
     if (!z) return -ENOMEM;
     memset(z, 0, CH);
     while (len && rc == LS_OK) {
@@ -155,7 +148,7 @@ static int zero_range(ls_store *s, uint64_t off, uint64_t len)
         off += k;
         len -= k;
     }
-    free(z);
+    ls_os_aligned_free(z);
     return rc;
 }
 
@@ -233,9 +226,9 @@ int ls_evict_to(ls_store *s, size_t budget, ls_rec *keep)
 int ls_spill_all(ls_store *s)
 {
     int rc;
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     rc = ls_evict_to(s, 0, NULL);
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return rc;
 }
 
@@ -393,31 +386,31 @@ int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
         return LS_ERR_INVAL;
     if (off + n < off) return LS_ERR_RANGE;
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
 
     if (op == LS_OP_READ) {
-        if (!r)                { pthread_mutex_unlock(&s->toc_lk);
+        if (!r)                { ls_mutex_unlock(&s->toc_lk);
                                  ls_report(s, LS_ERR_NOKEY, key, off, n, "read");
                                  return LS_ERR_NOKEY; }
-        if (off + n > r->size) { pthread_mutex_unlock(&s->toc_lk);
+        if (off + n > r->size) { ls_mutex_unlock(&s->toc_lk);
                                  ls_report(s, LS_ERR_RANGE, key, off, n, "read");
                                  return LS_ERR_RANGE; }
     } else {
         if (s->o.parallel == LS_SHARED &&
             (!r || off + n > r->size)) {     /* would change the layout */
-            pthread_mutex_unlock(&s->toc_lk);
+            ls_mutex_unlock(&s->toc_lk);
             ls_report(s, LS_ERR_MODE, key, off, n,
                       "a shared store's layout is frozen; reserve it before sharing");
             return LS_ERR_MODE;
         }
         if (!r) r = ls_toc_insert(s, key);
-        if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+        if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
         /* A write past the end leaves the gap zero-filled (§4b); fresh extents
          * arrive zeroed from ensure_extents and the resident path memsets. */
         rc = ensure_cap(s, r, off + n);
         if (rc != LS_OK) {
-            pthread_mutex_unlock(&s->toc_lk);
+            ls_mutex_unlock(&s->toc_lk);
             ls_report(s, rc, key, off, n, "reserving space for write");
             return rc;
         }
@@ -426,13 +419,13 @@ int ls_rw(ls_store *s, const char *key, uint64_t off, size_t n,
     if (r->mem) ls_lru_touch(s, r);
     r->busy++;
     ls_place_of(r, &pl);
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     rc = ls_scatter(s, &pl, off, n, rbuf, wbuf, op);
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r->busy--;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK)
         ls_report(s, rc, key, off, n, op == LS_OP_WRITE ? "write" : "read");
@@ -467,9 +460,9 @@ int ls_exists(ls_store *s, const char *key, int *found)
 {
     if (!s || !found || !ls_key_ok(key)) return LS_ERR_INVAL;
     LS_IF_HDF5(s, ls_h5_exists(s, key, found));
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     *found = ls_toc_find(s, key) != NULL;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return LS_OK;
 }
 
@@ -478,10 +471,10 @@ int ls_size(ls_store *s, const char *key, uint64_t *nbytes)
     ls_rec *r;
     if (!s || !nbytes || !ls_key_ok(key)) return LS_ERR_INVAL;
     LS_IF_HDF5(s, ls_h5_size(s, key, nbytes));
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r) *nbytes = r->size;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return r ? LS_OK : LS_ERR_NOKEY;
 }
 
@@ -491,10 +484,10 @@ int ls_erase(ls_store *s, const char *key)
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
     LS_IF_HDF5(s, ls_h5_erase(s, key));
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r) { ls_toc_unlink(s, r); ls_lru_drop(s, r); ls_rec_free(s, r); }
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return r ? LS_OK : LS_ERR_NOKEY;
 }
 
@@ -506,13 +499,13 @@ int ls_reserve(ls_store *s, const char *key, uint64_t nbytes)
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
     LS_IF_HDF5(s, ls_h5_reserve(s, key, nbytes));
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (!r) r = ls_toc_insert(s, key);
-    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
     rc = ensure_cap(s, r, nbytes);
     if (rc == LS_OK && nbytes > r->size) r->size = nbytes;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK)
         ls_report(s, rc, key, 0, 0, "reserve");
@@ -527,9 +520,9 @@ int ls_keys(ls_store *s, char ***keys, size_t *n)
     if (!s || !keys || !n) return LS_ERR_INVAL;
     LS_IF_HDF5(s, ls_h5_keys(s, keys, n));
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     out = s->nrec ? calloc(s->nrec, sizeof *out) : calloc(1, sizeof *out);
-    if (!out) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (!out) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
     for (i = 0; i < s->nbuckets; i++) {
         ls_rec *r;
         for (r = s->tab[i]; r; r = r->hnext) {
@@ -537,13 +530,13 @@ int ls_keys(ls_store *s, char ***keys, size_t *n)
             if (!out[k]) {
                 while (k) free(out[--k]);
                 free(out);
-                pthread_mutex_unlock(&s->toc_lk);
+                ls_mutex_unlock(&s->toc_lk);
                 return -ENOMEM;
             }
             k++;
         }
     }
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     *keys = out;
     *n = k;
@@ -575,17 +568,17 @@ int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
     /* The offset is taken and the record extended under one lock. That is the
      * whole point: ls_size followed by ls_write is not the same thing, because
      * another thread can append in between. */
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (!r) r = ls_toc_insert(s, key);
-    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
 
     off = r->size;
-    if (off + n < off) { pthread_mutex_unlock(&s->toc_lk); return LS_ERR_RANGE; }
+    if (off + n < off) { ls_mutex_unlock(&s->toc_lk); return LS_ERR_RANGE; }
 
     rc = ensure_cap(s, r, off + n);
     if (rc != LS_OK) {
-        pthread_mutex_unlock(&s->toc_lk);
+        ls_mutex_unlock(&s->toc_lk);
         ls_report(s, rc, key, off, n, "reserving space for append");
         return rc;
     }
@@ -593,13 +586,13 @@ int ls_append(ls_store *s, const char *key, size_t n, const void *buf,
     if (r->mem) ls_lru_touch(s, r);
     r->busy++;
     ls_place_of(r, &pl);
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     rc = ls_scatter(s, &pl, off, n, NULL, buf, LS_OP_WRITE);
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r->busy--;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK) ls_report(s, rc, key, off, n, "append");
     else if (off_out) *off_out = off;
@@ -640,27 +633,27 @@ static int segv(ls_store *s, const char *key, const ls_seg *segs, size_t nseg, i
 #endif
     /* One lookup for the whole list. Against Conquest's "thousands of individual
      * scalar operations per file", that alone is most of the gain. */
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
 
     if (op == LS_OP_READ) {
-        if (!r) { pthread_mutex_unlock(&s->toc_lk);
+        if (!r) { ls_mutex_unlock(&s->toc_lk);
                   ls_report(s, LS_ERR_NOKEY, key, 0, 0, "readv");
                   return LS_ERR_NOKEY; }
-        if (hi > r->size) { pthread_mutex_unlock(&s->toc_lk);
+        if (hi > r->size) { ls_mutex_unlock(&s->toc_lk);
                             ls_report(s, LS_ERR_RANGE, key, 0, 0, "readv");
                             return LS_ERR_RANGE; }
     } else {
         if (s->o.parallel == LS_SHARED && (!r || hi > r->size)) {
-            pthread_mutex_unlock(&s->toc_lk);
+            ls_mutex_unlock(&s->toc_lk);
             ls_report(s, LS_ERR_MODE, key, 0, hi,
                       "a shared store's layout is frozen; reserve it before sharing");
             return LS_ERR_MODE;
         }
         if (!r) r = ls_toc_insert(s, key);
-        if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+        if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
         rc = ensure_cap(s, r, hi);
-        if (rc != LS_OK) { pthread_mutex_unlock(&s->toc_lk);
+        if (rc != LS_OK) { ls_mutex_unlock(&s->toc_lk);
                            ls_report(s, rc, key, 0, 0, "reserving space for writev");
                            return rc; }
         if (hi > r->size) r->size = hi;
@@ -668,16 +661,16 @@ static int segv(ls_store *s, const char *key, const ls_seg *segs, size_t nseg, i
     if (r->mem) ls_lru_touch(s, r);
     r->busy++;
     ls_place_of(r, &pl);
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     for (i = 0; i < nseg && rc == LS_OK; i++)
         rc = ls_scatter(s, &pl, segs[i].off, segs[i].len,
                         op == LS_OP_READ ? segs[i].buf : NULL,
                         op == LS_OP_READ ? NULL : segs[i].buf, op);
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r->busy--;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK)
         ls_report(s, rc, key, 0, 0, op == LS_OP_READ ? "readv" : "writev");
@@ -701,13 +694,13 @@ int ls_set_attr(ls_store *s, const char *key, const void *blob, size_t n)
     if (s->o.parallel == LS_SHARED) return LS_ERR_MODE;
     LS_IF_HDF5(s, ls_h5_set_attr(s, key, blob, n));
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (!r) r = ls_toc_insert(s, key);
-    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
     if (n) memcpy(r->attr, blob, n);
     r->attrlen = (uint32_t)n;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return LS_OK;
 }
 
@@ -719,7 +712,7 @@ int ls_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
     if (!s || !ls_key_ok(key) || !n) return LS_ERR_INVAL;
     LS_IF_HDF5(s, ls_h5_get_attr(s, key, blob, n));
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (!r) {
         rc = LS_ERR_NOKEY;
@@ -732,7 +725,7 @@ int ls_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
         if (r->attrlen) memcpy(blob, r->attr, r->attrlen);
         *n = r->attrlen;
     }
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
     return rc;
 }
 
@@ -771,19 +764,19 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
     if (off + n < off) return LS_ERR_RANGE;
     if (n == 0) return LS_OK;
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (s->o.parallel == LS_SHARED && (!r || off + n > r->size)) {
-        pthread_mutex_unlock(&s->toc_lk);
+        ls_mutex_unlock(&s->toc_lk);
         ls_report(s, LS_ERR_MODE, key, off, n,
                   "a shared store's layout is frozen; reserve it before sharing");
         return LS_ERR_MODE;
     }
     if (!r) r = ls_toc_insert(s, key);
-    if (!r) { pthread_mutex_unlock(&s->toc_lk); return -ENOMEM; }
+    if (!r) { ls_mutex_unlock(&s->toc_lk); return -ENOMEM; }
     rc = ensure_cap(s, r, off + n);
     if (rc != LS_OK) {
-        pthread_mutex_unlock(&s->toc_lk);
+        ls_mutex_unlock(&s->toc_lk);
         ls_report(s, rc, key, off, n, "reserving space for accumulate");
         return rc;
     }
@@ -791,7 +784,7 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
     if (r->mem) ls_lru_touch(s, r);
     r->busy++;
     ls_place_of(r, &pl);
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (pl.mem) {
         /* The case §4 exists for: resident, so the reduction runs in place and
@@ -817,9 +810,9 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
         }
     }
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r->busy--;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK) ls_report(s, rc, key, off, n, "accumulate");
     return rc;
@@ -833,15 +826,14 @@ int ls_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
  *
  * A record is a list of extents, so it is not contiguous in the file and cannot
  * be handed to one mmap call. It can still be handed to the caller as one
- * pointer: reserve the whole logical span with an anonymous PROT_NONE mapping,
- * then map each extent over its own slice with MAP_FIXED. Extents are
- * LS_ALIGN-aligned and LS_ALIGN-sized, which is what makes this legal, and is
- * a reason that alignment is worth keeping beyond O_DIRECT.
+ * pointer, and how that is done is the platform's business rather than this
+ * file's: ls_os_map_extents.
  *
  * Errors under a mapping arrive as SIGBUS, which §3 says the library documents
  * and does not attempt to hide. It cannot: a fault happens in the caller's
  * instruction stream, not inside a libspill call. */
 
+#ifdef LS_HAVE_MMAP
 int ls_map(ls_store *s, const char *key, void **addr, size_t *len)
 {
     ls_rec  *r;
@@ -854,48 +846,34 @@ int ls_map(ls_store *s, const char *key, void **addr, size_t *len)
     if (!s || !ls_key_ok(key) || !addr) return LS_ERR_INVAL;
     if (s->o.mode != LS_MAPPED) return LS_ERR_MODE;
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (!r || r->size == 0) {
-        pthread_mutex_unlock(&s->toc_lk);
+        ls_mutex_unlock(&s->toc_lk);
         ls_report(s, r ? LS_ERR_RANGE : LS_ERR_NOKEY, key, 0, 0, "map");
         return r ? LS_ERR_RANGE : LS_ERR_NOKEY;
     }
     if (r->map_addr) {                       /* already mapped: hand it back */
         *addr = r->map_addr;
         if (len) *len = (size_t)r->size;
-        pthread_mutex_unlock(&s->toc_lk);
+        ls_mutex_unlock(&s->toc_lk);
         return LS_OK;
     }
     ls_place_of(r, &pl);
     for (i = 0; i < pl.next; i++) total += pl.ext[i].len;
     logical = r->size;
     r->busy++;
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
-    base = mmap(NULL, (size_t)total, PROT_NONE,
-                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (base == MAP_FAILED) {
-        rc = -errno;
-    } else {
-        uint64_t at = 0;
-        for (i = 0; i < pl.next && rc == LS_OK; i++) {
-            void *want = base + at;
-            void *got = mmap(want, (size_t)pl.ext[i].len, PROT_READ | PROT_WRITE,
-                             MAP_SHARED | MAP_FIXED, s->fd, (off_t)pl.ext[i].foff);
-            if (got == MAP_FAILED) rc = -errno;
-            at += pl.ext[i].len;
-        }
-        if (rc != LS_OK) { munmap(base, (size_t)total); base = MAP_FAILED; }
-    }
+    base = ls_os_map_extents(s->fd, pl.ext, pl.next, total, &rc);
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r->busy--;
     if (rc == LS_OK) {
         r->map_addr = base;
         r->map_len  = (size_t)total;
     }
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (rc != LS_OK) { ls_report(s, rc, key, 0, 0, "map"); return rc; }
     *addr = base;
@@ -912,7 +890,7 @@ int ls_unmap(ls_store *s, const char *key)
     if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
     if (s->o.mode != LS_MAPPED) return LS_ERR_MODE;
 
-    pthread_mutex_lock(&s->toc_lk);
+    ls_mutex_lock(&s->toc_lk);
     r = ls_toc_find(s, key);
     if (r && r->map_addr) {
         a = r->map_addr;
@@ -920,9 +898,29 @@ int ls_unmap(ls_store *s, const char *key)
         r->map_addr = NULL;
         r->map_len = 0;
     }
-    pthread_mutex_unlock(&s->toc_lk);
+    ls_mutex_unlock(&s->toc_lk);
 
     if (!r) return LS_ERR_NOKEY;
     if (!a) return LS_OK;                    /* not mapped: nothing to undo */
-    return munmap(a, n) == 0 ? LS_OK : -errno;
+    {
+        int urc = ls_os_unmap(a, n);
+        return urc == 0 ? LS_OK : urc;
+    }
 }
+#else
+/* No mapping on this platform -- see os.h. ls_open refuses LS_MAPPED, so a
+ * store can never be in the mode these require; they answer the way they
+ * already would for a store opened in any other mode. */
+int ls_map(ls_store *s, const char *key, void **addr, size_t *len)
+{
+    (void)addr; (void)len;
+    if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
+    return LS_ERR_MODE;
+}
+
+int ls_unmap(ls_store *s, const char *key)
+{
+    if (!s || !ls_key_ok(key)) return LS_ERR_INVAL;
+    return LS_ERR_MODE;
+}
+#endif

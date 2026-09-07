@@ -50,9 +50,16 @@ int main(void)
 
     /* 3. The errnos §4b promises to pass through unchanged must be nameable and
      *    must not collide with anything of ours. */
+#ifdef EDQUOT
     sprintf(detail, "ENOSPC=%d EIO=%d EDQUOT=%d", ENOSPC, EIO, EDQUOT);
     check(ENOSPC < 1000 && EIO < 1000 && EDQUOT < 1000,
           "passed-through errnos are in range", detail);
+#else
+    /* EDQUOT is POSIX, not C: the MSVC CRT has no such errno. The property
+     * being checked is about the ones that exist. */
+    sprintf(detail, "ENOSPC=%d EIO=%d (no EDQUOT on this platform)", ENOSPC, EIO);
+    check(ENOSPC < 1000 && EIO < 1000, "passed-through errnos are in range", detail);
+#endif
 
     /* 4. version is first in ls_opts, which is what lets the struct grow
      *    without breaking a caller built against an older header. */

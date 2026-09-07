@@ -193,7 +193,7 @@ static int h5_transfer(ls_store *s, const char *key, uint64_t off, size_t n,
 int ls_h5_open(ls_store *s, const char *path, int existing)
 {
     h5_quiet();
-    pthread_mutex_init(&s->h5_lk, NULL);
+    ls_mutex_init(&s->h5_lk);
     s->h5_file = existing
         ? H5Fopen(path, H5F_ACC_RDWR, H5P_DEFAULT)
         : H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
@@ -210,7 +210,7 @@ int ls_h5_close(ls_store *s)
     int rc = LS_OK;
     if (s->h5_file >= 0 && H5Fclose(s->h5_file) < 0) rc = LS_ERR_BACKEND;
     s->h5_file = -1;
-    pthread_mutex_destroy(&s->h5_lk);
+    ls_mutex_destroy(&s->h5_lk);
     return rc;
 }
 
@@ -219,9 +219,9 @@ int ls_h5_rw(ls_store *s, const char *key, uint64_t off, size_t n,
 {
     int rc;
     if (n == 0) return LS_OK;
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     rc = h5_transfer(s, key, off, n, rbuf, wbuf, op);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     if (rc != LS_OK)
         ls_report(s, rc, key, off, n, op == LS_OP_WRITE ? "write" : "read");
     return rc;
@@ -230,27 +230,27 @@ int ls_h5_rw(ls_store *s, const char *key, uint64_t off, size_t n,
 int ls_h5_size(ls_store *s, const char *key, uint64_t *n)
 {
     int rc;
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     rc = h5_extent(s, key, n);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     return rc;
 }
 
 int ls_h5_exists(ls_store *s, const char *key, int *found)
 {
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     *found = h5_dataset_exists(s, key);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     return LS_OK;
 }
 
 int ls_h5_erase(ls_store *s, const char *key)
 {
     int rc = LS_OK;
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     if (!h5_dataset_exists(s, key)) rc = LS_ERR_NOKEY;
     else if (H5Ldelete(s->h5_file, key, H5P_DEFAULT) < 0) rc = LS_ERR_BACKEND;
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     return rc;
 }
 
@@ -258,11 +258,11 @@ int ls_h5_reserve(ls_store *s, const char *key, uint64_t nbytes)
 {
     hid_t ds;
     int rc = LS_OK;
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     ds = h5_open_or_create(s, key, nbytes, 1);
     if (ds < 0) rc = LS_ERR_BACKEND;
     else H5Dclose(ds);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     if (rc != LS_OK) ls_report(s, rc, key, 0, 0, "reserve");
     return rc;
 }
@@ -273,13 +273,13 @@ int ls_h5_append(ls_store *s, const char *key, size_t n, const void *buf,
     uint64_t at = 0;
     int rc;
 
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     if (h5_dataset_exists(s, key)) {
         rc = h5_extent(s, key, &at);
-        if (rc != LS_OK) { pthread_mutex_unlock(&s->h5_lk); return rc; }
+        if (rc != LS_OK) { ls_mutex_unlock(&s->h5_lk); return rc; }
     }
     rc = h5_transfer(s, key, at, n, NULL, buf, LS_OP_WRITE);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
 
     if (rc == LS_OK && off_out) *off_out = at;
     return rc;
@@ -294,7 +294,7 @@ int ls_h5_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
     tmp = malloc(n);
     if (!tmp) return -ENOMEM;
 
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     rc = h5_transfer(s, key, off, n, tmp, NULL, LS_OP_READ);
     if (rc == LS_ERR_NOKEY || rc == LS_ERR_RANGE) {
         memset(tmp, 0, n);                       /* accumulate into fresh space */
@@ -304,7 +304,7 @@ int ls_h5_accumulate(ls_store *s, const char *key, uint64_t off, size_t n,
         op(tmp, buf, n, ctx);
         rc = h5_transfer(s, key, off, n, NULL, tmp, LS_OP_WRITE);
     }
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
 
     free(tmp);
     if (rc != LS_OK) ls_report(s, rc, key, off, n, "accumulate");
@@ -319,9 +319,9 @@ int ls_h5_set_attr(ls_store *s, const char *key, const void *blob, size_t n)
     hsize_t dim = (hsize_t)n;
     int rc = LS_OK;
 
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     ds = h5_open_or_create(s, key, 0, 1);
-    if (ds < 0) { pthread_mutex_unlock(&s->h5_lk); return LS_ERR_BACKEND; }
+    if (ds < 0) { ls_mutex_unlock(&s->h5_lk); return LS_ERR_BACKEND; }
     if (H5Aexists(ds, H5_ATTR_NAME) > 0) H5Adelete(ds, H5_ATTR_NAME);
     sp = H5Screate_simple(1, &dim, NULL);
     at = H5Acreate2(ds, H5_ATTR_NAME, H5T_NATIVE_UCHAR, sp, H5P_DEFAULT, H5P_DEFAULT);
@@ -329,7 +329,7 @@ int ls_h5_set_attr(ls_store *s, const char *key, const void *blob, size_t n)
     if (at >= 0) H5Aclose(at);
     H5Sclose(sp);
     H5Dclose(ds);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     return rc;
 }
 
@@ -339,14 +339,14 @@ int ls_h5_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
     hsize_t dim = 0;
     int rc = LS_OK;
 
-    pthread_mutex_lock(&s->h5_lk);
-    if (!h5_dataset_exists(s, key)) { pthread_mutex_unlock(&s->h5_lk); return LS_ERR_NOKEY; }
+    ls_mutex_lock(&s->h5_lk);
+    if (!h5_dataset_exists(s, key)) { ls_mutex_unlock(&s->h5_lk); return LS_ERR_NOKEY; }
     ds = H5Dopen2(s->h5_file, key, H5P_DEFAULT);
-    if (ds < 0) { pthread_mutex_unlock(&s->h5_lk); return LS_ERR_BACKEND; }
+    if (ds < 0) { ls_mutex_unlock(&s->h5_lk); return LS_ERR_BACKEND; }
     if (H5Aexists(ds, H5_ATTR_NAME) <= 0) {
         *n = 0;
         H5Dclose(ds);
-        pthread_mutex_unlock(&s->h5_lk);
+        ls_mutex_unlock(&s->h5_lk);
         return LS_OK;
     }
     at = H5Aopen(ds, H5_ATTR_NAME, H5P_DEFAULT);
@@ -365,7 +365,7 @@ int ls_h5_get_attr(ls_store *s, const char *key, void *blob, size_t *n)
     }
     H5Aclose(at);
     H5Dclose(ds);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
     return rc;
 }
 
@@ -394,9 +394,9 @@ int ls_h5_keys(ls_store *s, char ***keys, size_t *n)
     hsize_t idx = 0;
 
     memset(&kl, 0, sizeof kl);
-    pthread_mutex_lock(&s->h5_lk);
+    ls_mutex_lock(&s->h5_lk);
     LS_H5_ITERATE(s->h5_file, H5_INDEX_NAME, H5_ITER_NATIVE, &idx, h5_collect, &kl);
-    pthread_mutex_unlock(&s->h5_lk);
+    ls_mutex_unlock(&s->h5_lk);
 
     if (kl.bad) {
         while (kl.n) free(kl.v[--kl.n]);

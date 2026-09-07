@@ -11,7 +11,6 @@
  */
 #include <errno.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 
 #include "internal.h"
@@ -71,7 +70,7 @@ static int fl_insert(ls_store *s, uint64_t foff, uint64_t len)
     if (s->nfl && s->fl[s->nfl - 1].foff + s->fl[s->nfl - 1].len == s->file_end) {
         s->file_end = s->fl[s->nfl - 1].foff;
         s->nfl--;
-        if (ftruncate(s->fd, (off_t)s->file_end) != 0)
+        if (ls_os_ftruncate(s->fd, s->file_end) != 0)
             ls_report(s, -errno, NULL, s->file_end, 0, "truncating freed tail");
     }
     return LS_OK;
@@ -90,7 +89,7 @@ int ls_alloc_best(ls_store *s, uint64_t need, ls_extent *out)
     need = round_up(need);
     if (need == 0) return 0;
 
-    pthread_mutex_lock(&s->alloc_lk);
+    ls_mutex_lock(&s->alloc_lk);
     for (i = 0; i < s->nfl; i++)
         if (s->fl[i].len >= need &&
             (best == (size_t)-1 || s->fl[i].len < s->fl[best].len))
@@ -107,7 +106,7 @@ int ls_alloc_best(ls_store *s, uint64_t need, ls_extent *out)
             s->fl[best].len  -= need;
         }
     }
-    pthread_mutex_unlock(&s->alloc_lk);
+    ls_mutex_unlock(&s->alloc_lk);
     return best != (size_t)-1;
 }
 
@@ -116,7 +115,7 @@ int ls_alloc_largest(ls_store *s, uint64_t least, ls_extent *out)
 {
     size_t i, big = (size_t)-1;
 
-    pthread_mutex_lock(&s->alloc_lk);
+    ls_mutex_lock(&s->alloc_lk);
     for (i = 0; i < s->nfl; i++)
         if (big == (size_t)-1 || s->fl[i].len > s->fl[big].len) big = i;
     if (big != (size_t)-1 && s->fl[big].len >= round_up(least)) {
@@ -128,7 +127,7 @@ int ls_alloc_largest(ls_store *s, uint64_t least, ls_extent *out)
     } else {
         big = (size_t)-1;
     }
-    pthread_mutex_unlock(&s->alloc_lk);
+    ls_mutex_unlock(&s->alloc_lk);
     return big != (size_t)-1;
 }
 
@@ -136,11 +135,11 @@ int ls_alloc_largest(ls_store *s, uint64_t least, ls_extent *out)
 void ls_alloc_tail(ls_store *s, uint64_t need, ls_extent *out)
 {
     need = round_up(need);
-    pthread_mutex_lock(&s->alloc_lk);
+    ls_mutex_lock(&s->alloc_lk);
     out->foff = s->file_end;
     out->len  = need;
     s->file_end += need;
-    pthread_mutex_unlock(&s->alloc_lk);
+    ls_mutex_unlock(&s->alloc_lk);
 }
 
 void ls_free_extents(ls_store *s, ls_extent *e, size_t n)
@@ -151,18 +150,18 @@ void ls_free_extents(ls_store *s, ls_extent *e, size_t n)
      * already been written; recycling their extents would shrink the free list
      * back over the table of contents we just persisted. */
     if (s->teardown) return;
-    pthread_mutex_lock(&s->alloc_lk);
+    ls_mutex_lock(&s->alloc_lk);
     for (i = 0; i < n; i++)
         (void)fl_insert(s, e[i].foff, e[i].len);
-    pthread_mutex_unlock(&s->alloc_lk);
+    ls_mutex_unlock(&s->alloc_lk);
 }
 
 uint64_t ls_alloc_live(ls_store *s)
 {
     uint64_t hole = 0, i;
-    pthread_mutex_lock(&s->alloc_lk);
+    ls_mutex_lock(&s->alloc_lk);
     for (i = 0; i < s->nfl; i++) hole += s->fl[i].len;
     i = s->file_end - LS_SUPER_SIZE - hole;
-    pthread_mutex_unlock(&s->alloc_lk);
+    ls_mutex_unlock(&s->alloc_lk);
     return i;
 }

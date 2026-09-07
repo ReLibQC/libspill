@@ -123,7 +123,7 @@ int main() {
 
     // ---- the memory tier is where accumulate never touches disk ----
     {
-        ls::store s{"cxx_mem", {.memory_budget = 8ull << 20}};
+        ls::store s{"cxx_mem", {.memory_budget = 8ull << 20, .dir = "."}};
         std::vector<double> v(1024, 1.0), one(1024, 1.0);
         s.write<double>("a", 0, v);
         for (int i = 0; i < 100; i++) s.accumulate<double>("a", 0, one);
@@ -135,8 +135,10 @@ int main() {
 
         // §4's actual claim: resident, the reduction runs in place and disk is
         // never touched. Only the superblock should ever have been written.
-        const char *td = std::getenv("TMPDIR");
-        std::filesystem::path p = std::filesystem::path(td ? td : "/tmp") / "cxx_mem.libspill";
+        // The path is pinned above rather than re-derived here: the library's
+        // default directory is the platform's, and guessing it is what broke
+        // this check on Windows.
+        std::filesystem::path p = std::filesystem::path(".") / "cxx_mem.libspill";
         ok(std::filesystem::exists(p) && std::filesystem::file_size(p) == 4096,
            "  ... and never reached disk");
     }

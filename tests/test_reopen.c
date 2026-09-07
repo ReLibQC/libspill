@@ -94,7 +94,10 @@ int main(void)
     ls_store *s;
     int err = 0, c, i;
 
-    puts("libspill reopen (issue #7)");
+    /* Worth saying out loud: on a filesystem without FALLOC_FL_ZERO_RANGE
+     * (tmpfs, notably) the zeroing always went through the explicit write
+     * fallback, which was never wrong, so a pass here proves nothing. */
+    printf("libspill reopen (issue #7), stores in %s\n", dir());
 
     ls_opts_default(&o);
     o.dir = dir();

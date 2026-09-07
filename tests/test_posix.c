@@ -2,12 +2,11 @@
 /* Correctness suite for the POSIX backend: the §4b contract, the memory tier,
  * the async layer, and the concurrency §5a promises. */
 #include <errno.h>
-#include <pthread.h>
+#include "thread_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include "libspill.h"
 
@@ -33,12 +32,21 @@ static void ok_rc(int rc, int want, const char *what)
     }
 }
 
+/* Where the stores go. Several checks below stat the file the library created,
+ * so the test and the library must agree on its path -- and the way to agree is
+ * to say it, not for each side to work out the platform's default separately.
+ * That is what broke on Windows: the test resolved TMPDIR then /tmp while the
+ * library asked GetTempPath, and they had only ever agreed by coincidence.
+ * "." is ctest's working directory. */
+#define TEST_DIR "."
+
 static ls_store *fresh(const char *name, size_t budget)
 {
     ls_opts o;
     int err = 0;
     ls_store *s;
     ls_opts_default(&o);
+    o.dir = TEST_DIR;
     o.memory_budget = budget;
     s = ls_open(name, &o, &err);
     if (!s) { printf("  [FAIL] open %s: %d\n", name, err); exit(1); }
@@ -132,8 +140,13 @@ static void t_options(void)
     ls_opts_default(&o);
     o.mode = LS_MAPPED;
     s = ls_open("t_opt_m", &o, &err);
-    ok(s != NULL && err == LS_OK, "LS_MAPPED store opens");
-    if (s) ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
+    if (!s && err == LS_ERR_MODE) {
+        ok(1, "LS_MAPPED is refused with LS_ERR_MODE (no mapping on this platform)");
+        ok(1, "  ... which is the documented answer where mapping is absent");
+    } else {
+        ok(s != NULL && err == LS_OK, "LS_MAPPED store opens");
+        if (s) ok_rc(ls_close(s, 0), LS_OK, "  ... and closes");
+    }
 
     /* the combination that is wrong in principle outranks the one that is
      * merely not built yet, so this stays stable when LS_MAPPED lands */
@@ -215,7 +228,6 @@ static void t_memory_tier(void)
     double *buf = malloc(N * sizeof *buf), *back = malloc(N * sizeof *back);
     ls_store *s;
     struct stat st;
-    const char *dir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
     char path[512];
     size_t i;
 
@@ -227,7 +239,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read from the memory tier");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "memory tier round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem.libspill", dir);
+    snprintf(path, sizeof path, "%s/t_mem.libspill", TEST_DIR);
     ok(stat(path, &st) == 0 && st.st_size == 4096,
        "nothing was written to disk while under budget");
     ls_close(s, 0);
@@ -239,7 +251,7 @@ static void t_memory_tier(void)
     memset(back, 0, N * sizeof *back);
     ok_rc(ls_read(s, "a", 0, N * sizeof *back, back), LS_OK, "read a spilled record");
     ok(memcmp(buf, back, N * sizeof *buf) == 0, "spilled record round-trips exactly");
-    snprintf(path, sizeof path, "%s/t_mem2.libspill", dir);
+    snprintf(path, sizeof path, "%s/t_mem2.libspill", TEST_DIR);
     ok(stat(path, &st) == 0 && st.st_size > 4096, "the spill reached disk");
     ls_close(s, 0);
 
@@ -322,7 +334,7 @@ static void *hammer(void *p)
 static void t_concurrent(void)
 {
     ls_store *s = fresh("t_conc", 0);
-    pthread_t th[NTHREAD];
+    ls_test_thread th[NTHREAD];
     struct arg ar[NTHREAD];
     int i, bad = 0;
     char **k = NULL;
@@ -330,10 +342,10 @@ static void t_concurrent(void)
 
     for (i = 0; i < NTHREAD; i++) {
         ar[i].s = s; ar[i].id = i; ar[i].bad = 0;
-        pthread_create(&th[i], NULL, hammer, &ar[i]);
+        ls_test_thread_create(&th[i], hammer, &ar[i]);
     }
     for (i = 0; i < NTHREAD; i++) {
-        pthread_join(th[i], NULL);
+        ls_test_thread_join(th[i]);
         if (ar[i].bad) bad = ar[i].bad;
     }
     ok(!bad, "8 threads x 64 distinct keys: no error, no corruption");
@@ -375,17 +387,17 @@ static void t_persist(void)
 
     /* a file that is not one of ours must not be silently truncated */
     {
-        const char *dir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
         char path[512];
         FILE *f;
-        snprintf(path, sizeof path, "%s/t_junk.libspill", dir);
+        snprintf(path, sizeof path, "%s/t_junk.libspill", TEST_DIR);
         f = fopen(path, "wb");
         if (f) { char junk[8192]; memset(junk, 'Z', sizeof junk);
                  fwrite(junk, 1, sizeof junk, f); fclose(f); }
         ls_opts_default(&o);
+        o.dir = TEST_DIR;
         s = ls_open("t_junk", &o, &err);
         ok(s == NULL && err == LS_ERR_CORRUPT, "a foreign file is refused, not clobbered");
-        unlink(path);
+        remove(path);          /* C89; unlink is POSIX-only */
     }
 }
 

@@ -33,18 +33,9 @@ const char *ls_strerror(int err, char *buf, size_t buflen)
     if (m) {
         snprintf(buf, buflen, "%s", m);
     } else if (err < 0 && err > -1000) {
-        /* The negated-errno range. strerror_r has two incompatible flavours --
-         * GNU returns char* and may not touch the buffer, XSI returns int --
-         * and getting this wrong prints uninitialised stack. */
-        char sys[96];
-#if defined(__GLIBC__) && defined(_GNU_SOURCE)
-        const char *p = strerror_r(-err, sys, sizeof sys);
-        snprintf(buf, buflen, "%s", p ? p : "unknown error");
-#else
-        if (strerror_r(-err, sys, sizeof sys) != 0)
-            snprintf(sys, sizeof sys, "errno %d", -err);
-        snprintf(buf, buflen, "%s", sys);
-#endif
+        /* The negated-errno range. Which strerror this is, and how it reports,
+         * is the platform floor's problem -- see ls_os_strerror. */
+        ls_os_strerror(-err, buf, buflen);
     } else {
         snprintf(buf, buflen, "unknown error %d", err);
     }

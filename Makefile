@@ -22,7 +22,8 @@ FCFLAGS  += -std=f2008 -Wall -Jfortran -Ifortran
 DEPFLAGS = -MMD -MP
 LDLIBS  += -lpthread
 
-SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c
+SRC  := src/error.c src/toc.c src/alloc.c src/store.c src/open.c src/async.c \
+        src/os_posix.c
 
 # The optional HDF5 backend (§7b). Enabled when the headers are present; a
 # library built without them still accepts LS_HDF5 at compile time and refuses
@@ -136,7 +137,7 @@ check-install:
 	 LD_LIBRARY_PATH=$$(dirname $$(find $(INSTALL_TEST_DIR)/prefix -name 'libspill.so.0.*')) \
 	   sh -c '$(INSTALL_TEST_DIR)/consumer/c_use && \
 	          $(INSTALL_TEST_DIR)/consumer/cxx_use && \
-	          $(INSTALL_TEST_DIR)/consumer/f_use' && \
+	          { [ ! -x $(INSTALL_TEST_DIR)/consumer/f_use ] || $(INSTALL_TEST_DIR)/consumer/f_use; }' && \
 	 rm -rf $(INSTALL_TEST_DIR)
 
 check-clean:

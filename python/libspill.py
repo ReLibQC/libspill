@@ -43,7 +43,7 @@ EXPLICIT, MAPPED = 0, 1
 LOCAL, PER_RANK, SHARED = 0, 1, 2
 
 KEY_MAX, ATTR_MAX = 255, 256
-_OPTS_VERSION = 2
+_OPTS_VERSION = 3
 
 
 def _load():
@@ -82,6 +82,7 @@ class _Opts(ctypes.Structure):
         ("log", ctypes.c_void_p),
         ("log_ctx", ctypes.c_void_p),
         ("exact_name", ctypes.c_int),      # LS_OPTS_VERSION 2
+        ("durable_close", ctypes.c_int),   # LS_OPTS_VERSION 3
     ]
 
 
@@ -213,7 +214,7 @@ class Store:
 
     def __init__(self, name, *, memory_budget=0, dir=None, direct_io=False,
                  backend=POSIX, mode=EXPLICIT, parallel=LOCAL, rank=-1,
-                 keep=False, exact_name=False):
+                 keep=False, exact_name=False, durable_close=False):
         o = _Opts()
         # ls_opts_init with OUR version, never ls_opts_default: that symbol
         # fills the newest version and would write past a mirror of an older
@@ -227,6 +228,7 @@ class Store:
         o.dir = dir.encode() if dir else None
         o.direct_io = 1 if direct_io else 0
         o.exact_name = 1 if exact_name else 0
+        o.durable_close = 1 if durable_close else 0
         err = ctypes.c_int(0)
         self._s = _lib.ls_open(name.encode(), ctypes.byref(o), ctypes.byref(err))
         if not self._s:

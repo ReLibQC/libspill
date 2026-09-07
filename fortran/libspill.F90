@@ -48,7 +48,7 @@ module libspill
   ! component is a deliberate edit next to bumping this, and so ls_abi_ok can
   ! check the mirror against the library it is actually linked to -- the
   ! disagreement is otherwise silent memory corruption.
-  integer(c_int32_t), parameter :: LS_OPTS_VERSION_MIRRORED = 2_c_int32_t
+  integer(c_int32_t), parameter :: LS_OPTS_VERSION_MIRRORED = 3_c_int32_t
 
   ! Mirrors ls_opts. Obtain one from ls_defaults, never by declaring and filling.
   type, bind(c) :: ls_opts_t
@@ -64,6 +64,8 @@ module libspill
     type(c_ptr)        :: log_ctx
     ! added in LS_OPTS_VERSION 2
     integer(c_int)     :: exact_name
+    ! added in LS_OPTS_VERSION 3
+    integer(c_int)     :: durable_close
   end type ls_opts_t
 
   interface

@@ -45,7 +45,8 @@ static size_t opts_size(uint32_t version)
 {
     switch (version) {
         case 1u: return offsetof(ls_opts, exact_name);
-        case 2u: return sizeof(ls_opts);
+        case 2u: return offsetof(ls_opts, durable_close);
+        case 3u: return sizeof(ls_opts);
         default: return 0;
     }
 }
@@ -497,7 +498,11 @@ int ls_close(ls_store *s, int keep)
             put32(sb + 40, crc32_of(tb, tn));
             rc = ls_pwrite_all(s, tb, tn, s->file_end);
             if (rc == LS_OK) rc = ls_pwrite_all(s, sb, LS_SUPER_SIZE, 0);
-            if (rc == LS_OK && ls_os_fsync(s->fd) != 0) rc = -errno;
+            /* Only if the caller asked. See durable_close in libspill.h:
+             * forcing a journal commit on every scratch close dominated the
+             * runs that close often, and bought a guarantee §3 disclaims. */
+            if (rc == LS_OK && s->o.durable_close && ls_os_fsync(s->fd) != 0)
+                rc = -errno;
         }
         free(tb);
         if (first == LS_OK) first = rc;

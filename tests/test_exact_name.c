@@ -166,6 +166,58 @@ int main(void)
            "  ... and leaves bytes past version 1 untouched");
     }
 
+    /* Version 3 added durable_close. The point of the machinery is that a
+     * caller built against version 2 keeps working and gets the new field's
+     * default, so check both halves of that. */
+    {
+        ls_opts probe;
+        ok(ls_opts_size(2u) == offsetof(ls_opts, durable_close),
+           "ls_opts_size(2) stops before durable_close");
+        ok(ls_opts_size(3u) == sizeof(ls_opts), "ls_opts_size(3) is the whole struct");
+        ok(ls_opts_size(4u) == 0, "an unknown opts version has no size");
+
+        memset(&probe, 0xAB, sizeof probe);
+        ls_opts_init(&probe, 2u);
+        ok(probe.version == 2u, "ls_opts_init(o, 2) records version 2");
+        ok(*((unsigned char *)&probe + offsetof(ls_opts, durable_close)) == 0xAB,
+           "  ... and leaves bytes past version 2 untouched");
+
+        /* A version-2 caller: ls_open must read only what it declared and
+         * leave durable_close at its default rather than at 0xAB. */
+        probe.dir = dir();
+        s = ls_open("v2caller", &probe, &err);
+        ok(s != NULL, "a version 2 opts struct still opens a store");
+        if (s) {
+            ok(ls_write(s, "k", 0, sizeof v, &v) == LS_OK, "  ... and writes");
+            ok(ls_close(s, 0) == LS_OK, "  ... and closes");
+        }
+    }
+
+    /* durable_close is not observable through the API -- the point of it is
+     * what the kernel is asked to do -- so check that both settings leave a
+     * store that reopens and reads back. */
+    {
+        int d;
+        for (d = 0; d <= 1; d++) {
+            ls_opts_default(&o);
+            o.dir = dir();
+            o.durable_close = d;
+            s = ls_open("durable", &o, &err);
+            ok(s != NULL, d ? "durable_close = 1 opens" : "durable_close = 0 opens");
+            if (!s) continue;
+            ok(ls_write(s, "k", 0, sizeof v, &v) == LS_OK, "  ... writes");
+            ok(ls_close(s, 1) == LS_OK, "  ... keep-closes");
+
+            back = 0;
+            s = ls_open("durable", &o, &err);
+            ok(s != NULL, "  ... reopens");
+            if (!s) continue;
+            ok(ls_read(s, "k", 0, sizeof back, &back) == LS_OK && back == v,
+               "  ... and the bytes are there");
+            ls_close(s, 0);
+        }
+    }
+
     { ls_opts_default(&o); s = ls_open("plain", &o, &err); if (s) ls_close(s, 0); }
 
     printf("%d checks, %d failed\n", ntest, fails);

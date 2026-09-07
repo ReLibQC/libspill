@@ -140,7 +140,7 @@ typedef enum {
 
 #define LS_KEY_MAX    255u   /* bytes in a key, excluding the NUL           */
 #define LS_ATTR_MAX   256u   /* bytes in a key's attribute blob             */
-#define LS_OPTS_VERSION 2u   /* 2 added exact_name */
+#define LS_OPTS_VERSION 3u   /* 2 added exact_name, 3 added durable_close */
 
 /* Called on every failure, before the code is returned, with whatever context
  * the failing operation had. This is how a caller gets "-ENOSPC while writing
@@ -164,7 +164,29 @@ typedef struct {
     void       *log_ctx;
     /* --- added in LS_OPTS_VERSION 2 --- */
     int         exact_name;     /* use <dir>/<name> verbatim; see below       */
+    /* --- added in LS_OPTS_VERSION 3 --- */
+    int         durable_close;  /* fsync a kept store on close; see below     */
 } ls_opts;
+/* durable_close: off by default, and the default is the point. A kept close
+ * writes the table of contents and the superblock, and until version 3 it also
+ * fsynced them. That bought a guarantee this library does not otherwise offer:
+ * §3 puts durable output outside its scope, and the persisted ToC exists so a
+ * scratch file can be inspected and reopened while debugging a port, not so a
+ * job can resume from one. A scratch file whose calculation died is rerun, not
+ * recovered.
+ *
+ * The cost was not marginal. Every close forced a journal commit, so a caller
+ * that cycles scratch files spent its time queued behind the filesystem rather
+ * than computing: an eT real-time coupled-cluster test went from 41.7 s on
+ * Fortran stream I/O to a 1200 s timeout through libspill, ~24 minutes of a 28
+ * minute run blocked in fsync (issue #6). A smaller local loop of 200
+ * keep-closes measured 8.7x.
+ *
+ * What a caller actually needs from a close is that the bytes are visible to it
+ * later in the same run, which the page cache already guarantees, with or
+ * without this flag. Set durable_close only if the store must survive the
+ * process that wrote it -- and note that even then this fsyncs the store's own
+ * file, not the directory entry naming it. */
 /* exact_name: by default a store is written to <dir>/<name>.libspill, and the
  * suffix is not decoration -- it is how ls_open tells one of our stores from an
  * unrelated file, returning LS_ERR_CORRUPT rather than misreading it. Set

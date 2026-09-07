@@ -80,6 +80,9 @@ struct options {
     /* Write to <dir>/<name> verbatim, with no .libspill suffix. For callers
      * whose own code inspects the filesystem; see the note in libspill.h. */
     bool        exact_name    = false;
+    /* fsync a kept store on close. Off by default; see the note in
+     * libspill.h. Scratch does not need to outlive the process. */
+    bool        durable_close = false;
 
     ls_opts to_c() const {
         ls_opts o;
@@ -92,6 +95,7 @@ struct options {
         o.dir           = dir.empty() ? nullptr : dir.c_str();
         o.direct_io     = direct_io ? 1 : 0;
         o.exact_name    = exact_name ? 1 : 0;
+        o.durable_close = durable_close ? 1 : 0;
         return o;
     }
 };

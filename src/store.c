@@ -104,16 +104,46 @@ int ls_pwrite_all(ls_store *s, const void *buf, size_t n, uint64_t off)
 
 /* Zeroes a file range. A freshly extended file is sparse and already reads as
  * zero, but a reused hole holds whatever the previous record left there, and
- * §4b promises reserved space and write gaps read as zero. */
+ * §4b promises reserved space and write gaps read as zero.
+ *
+ * Only the part of the range that lies inside the file can hold stale bytes;
+ * past the end there is nothing to erase, and a gap left behind by a later
+ * write reads as zero by POSIX. Clamping to the current size is not just an
+ * optimisation. A single FALLOC_FL_ZERO_RANGE call asked to both zero and
+ * extend was observed on ext4 to extend the file, report success, and leave
+ * the bytes below the old end of file untouched -- which is precisely where
+ * the previous ls_close wrote its table of contents, so a tail extent handed
+ * out over that ToC served its bytes back to the caller as data. Never let
+ * one call do both jobs. */
 static int zero_range(ls_store *s, uint64_t off, uint64_t len)
 {
     static const size_t CH = 1u << 20;
     unsigned char *z;
     int rc = LS_OK;
+    struct stat zst;
+    uint64_t old_end;
+
+    if (fstat(s->fd, &zst) != 0) return -errno;
+    old_end = (uint64_t)zst.st_size;
+
+    /* Extending is the first job: the new tail is a hole, so it reads as zero
+     * without anything being written, and ls_reserve depends on the file
+     * actually reaching that far. */
+    if (off + len > old_end && ftruncate(s->fd, (off_t)(off + len)) != 0)
+        return -errno;
+
+    /* Erasing is the second job, and only what was already inside the file can
+     * need it. */
+    if (off >= old_end) return LS_OK;
+    if (len > old_end - off) len = old_end - off;
+    if (len == 0) return LS_OK;
 
 #ifdef FALLOC_FL_ZERO_RANGE
+    /* The range is now wholly inside the file, so this cannot extend it;
+     * FALLOC_FL_KEEP_SIZE says so to the kernel as well as to the reader. */
     if (!s->direct &&
-        fallocate(s->fd, FALLOC_FL_ZERO_RANGE, (off_t)off, (off_t)len) == 0)
+        fallocate(s->fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE,
+                  (off_t)off, (off_t)len) == 0)
         return LS_OK;
 #endif
     z = aligned_alloc_or_null(CH);

@@ -12,6 +12,7 @@
 build/
 _build/
 cmake-build*/
+build-*/
 prefix/
 
 tests/abi_header_test

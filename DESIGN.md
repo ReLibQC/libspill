@@ -1785,6 +1785,52 @@ those records are large.
   `include/libspill.h`. Two of the six were defects in §4, not omissions: the
   struct had no backend or mode member at all, and §5a's distinct-key guarantee
   was unimplementable without a lock on the table of contents.
+- ~~Should collective I/O be part of the design?~~ **settled: no, not in the
+  library.** Seven survey codes asked for it (§3a (1): DFT-FE, QE/EPW, MOLGW,
+  Octopus, yambo, BigDFT, SIESTA). `LS_SHARED` answers the semantic request:
+  every rank writes its own disjoint range of one object, with no gather to rank
+  0. What a collective call adds beyond that is performance, not capability, and
+  four things weigh against building it in:
+  1. *It reintroduces MPI.* A collective needs a communicator, and `MPI_Comm` is
+     an `int` in MPICH and a pointer in Open MPI, so taking one would mean a
+     build per MPI implementation -- the dependency and the ABI fragility §4b
+     removed with `LS_SHARED_MPIIO`. The MPI 5 standard ABI would remove the
+     second objection only where it is deployed.
+  2. *Its gain is aggregation, and that is the wrong place for it.* Two-phase
+     collective buffering turns many small scattered accesses into few large
+     ones, which pays on Lustre or GPFS. Scratch defaults to node-local storage,
+     and `LS_SHARED` records are large contiguous ranges; the gain there is
+     expected to be small, though it has not been measured.
+  3. *It changes the API's concurrency model.* A collective must be entered by
+     every rank in step, where every entry point today is independent per call
+     and the asynchronous layer depends on that.
+  4. *The codes asking are mostly outside §3.* All seven are plane-wave or
+     real-space codes that already have working MPI-IO or parallel HDF5, and
+     whether their collective paths are scratch or restart output has not been
+     checked; the latter is HDF5's and TREXIO's job. None of the ports in
+     progress -- Psi4, OpenMolcas, qp2, eT -- has asked.
+
+  **The way in, if a port ever needs it, is an extents query rather than a
+  collective call.** An `LS_SHARED` store's layout is frozen, so where each
+  record lives in the file is fixed and every rank agrees on it. Exposing that,
+
+  ```c
+  /* LS_SHARED only: where key's bytes lie in the store's file, in logical
+   * order, so a caller with its own MPI runtime can do collective I/O on them
+   * directly. A new public type: the extent struct in src/ is internal. */
+  typedef struct { uint64_t file_off, len; } ls_file_range;
+  int ls_extents(ls_store *s, const char *key, ls_file_range *out, size_t max,
+                 size_t *n);
+  ```
+
+  lets such a caller `MPI_File_open` the same file and `MPI_File_write_at_all`
+  into those ranges, with libspill never touching MPI. It is §5a's conclusion
+  applied to I/O: cross-rank coordination belongs in the consumer's parallel
+  runtime, which already has the collective machinery. The price is that the
+  on-disk layout becomes public contract, but only in the one mode where it is
+  already frozen. It is not built until a port asks. An optional `libspill-mpi`
+  add-on, compiled only where MPI is found, stays the fallback beyond that, and
+  only on a measured need the extents query cannot meet.
 
 Still open, and the only one that matters:
 
